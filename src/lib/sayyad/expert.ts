@@ -13,7 +13,9 @@ export function parseCsv(text:string):string[][]{
   return rows.filter(r=>r.some(x=>x.trim()));
 }
 export function refang(raw:string){let u=raw.trim().replace(/^hxxps/i,'https').replace(/^hxxp/i,'http').replace(/\[\.\]|\(\.\)/g,'.').replace(/\[:\]/g,':');if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(u))u=`https://${u}`;return u;}
-export type ExpertRow={url_raw:string;url:string;domain:string;platform:string;impersonated_entity:string|null;note:string|null;excluded_reason:string|null};
+export type ExpertRow={url_raw:string;url:string;domain:string;platform:string;impersonated_entity:string|null;note:string|null;excluded_reason:string|null;expected?:'fraud'|'legit'|null};
+/** Expected answer column: fraud/legit, or Arabic احتيال / سليم / رسمي. */
+export function parseExpected(v?:string|null):'fraud'|'legit'|null{const x=(v ?? '').trim().toLowerCase();if(x==='fraud'||x==='احتيال')return 'fraud';if(x==='legit'||x==='سليم'||x==='رسمي')return 'legit';return null;}
 const social=['facebook.com','instagram.com','tiktok.com','x.com','t.me'];
 const within=(h:string,d:string)=>h===d||h.endsWith(`.${d}`);
 export function normalizeExpert(raw:string,entity?:string|null,note?:string|null):ExpertRow{
@@ -29,8 +31,8 @@ export function normalizeExpert(raw:string,entity?:string|null,note?:string|null
 export function importCsv(text:string):ExpertRow[]{
   const rows=parseCsv(text);const head=(rows[0] ?? []).map(h=>h.trim().toLowerCase());
   const ui=head.indexOf('url');if(ui<0)throw new Error('يجب أن يحتوي الملف على عمود url');
-  const ei=head.indexOf('impersonated_entity'),ni=head.indexOf('note');const seen=new Set<string>(),out:ExpertRow[]=[];
-  for(const r of rows.slice(1)){const raw=r[ui]?.trim();if(!raw)continue;const x=normalizeExpert(raw,ei>=0?r[ei]:null,ni>=0?r[ni]:null);if(seen.has(x.url))continue;seen.add(x.url);out.push(x);}
+  const ei=head.indexOf('impersonated_entity'),ni=head.indexOf('note'),xi=head.indexOf('expected');const seen=new Set<string>(),out:ExpertRow[]=[];
+  for(const r of rows.slice(1)){const raw=r[ui]?.trim();if(!raw)continue;const x={...normalizeExpert(raw,ei>=0?r[ei]:null,ni>=0?r[ni]:null),expected:xi>=0?parseExpected(r[xi]):null};if(seen.has(x.url))continue;seen.add(x.url);out.push(x);}
   return out;
 }
 /** Query/fragment stripped, like manual scans. */
@@ -63,4 +65,12 @@ export function accuracy(rows:{link_id:string|null;url:string}[],level:(linkId:s
   for(const r of rows){if(!r.link_id)continue;const l=level(r.link_id);if(l==='red'||l==='yellow'||l==='green'||l==='failed'||l==='removed'){c[l]++;if(l==='green')greens.push(r.url);}}
   const judged=c.red+c.yellow+c.green,scanned=judged+c.failed+c.removed;
   return {...c,scanned,judged,detection:judged?(c.red+c.yellow)/judged:0,strict:judged?c.red/judged:0,greens};
+}
+/** 2x2 against the expert's expected answer; only judged rows (red/yellow/green) count. */
+export function expectedMatrix(rows:{link_id:string|null;url:string;expected:string|null}[],level:(linkId:string)=>string|null){
+  const m={caught:0,missed:0,legitOk:0,falseAlarm:0};const missedUrls:string[]=[],falseUrls:string[]=[];
+  for(const r of rows){if(!r.link_id||!r.expected)continue;const l=level(r.link_id);if(l!=='red'&&l!=='yellow'&&l!=='green')continue;const flagged=l!=='green';
+    if(r.expected==='fraud'){if(flagged)m.caught++;else{m.missed++;missedUrls.push(r.url);}}
+    else if(r.expected==='legit'){if(flagged){m.falseAlarm++;falseUrls.push(r.url);}else m.legitOk++;}}
+  return {...m,detection:m.caught+m.missed?m.caught/(m.caught+m.missed):null,falseRate:m.falseAlarm+m.legitOk?m.falseAlarm/(m.falseAlarm+m.legitOk):null,missedUrls,falseUrls};
 }

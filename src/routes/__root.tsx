@@ -11,6 +11,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import { SessionProvider } from "@/components/sayyad/session";
+import { Splash, splashSeenScript } from "@/components/sayyad/brand";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import appCss from "../styles.css?url";
@@ -89,12 +90,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" },
+      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Reem+Kufi:wght@700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" },
       {
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
     ],
   }),
   shellComponent: RootShell,
@@ -108,6 +109,7 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="ar" dir="rtl" className="light">
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: splashSeenScript }} />
       </head>
       <body>
         {children}
@@ -123,7 +125,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <SessionProvider><Outlet /><Toaster richColors position="bottom-left" /></SessionProvider> breaks all child routes. */}
-      <SessionProvider><Outlet /><Toaster richColors position="bottom-left" /></SessionProvider>
+      <SessionProvider><Outlet /><Toaster richColors position="bottom-left" /><Splash /></SessionProvider>
     </QueryClientProvider>
   );
 }

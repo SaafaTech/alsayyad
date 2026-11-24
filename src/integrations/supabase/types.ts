@@ -347,6 +347,7 @@ export type Database = {
           created_by: string
           domain: string
           excluded_reason: string | null
+          expected: string | null
           id: string
           impersonated_entity: string | null
           link_id: string | null
@@ -361,6 +362,7 @@ export type Database = {
           created_by?: string
           domain?: string
           excluded_reason?: string | null
+          expected?: string | null
           id?: string
           impersonated_entity?: string | null
           link_id?: string | null
@@ -375,6 +377,7 @@ export type Database = {
           created_by?: string
           domain?: string
           excluded_reason?: string | null
+          expected?: string | null
           id?: string
           impersonated_entity?: string | null
           link_id?: string | null
@@ -419,6 +422,50 @@ export type Database = {
           source?: string
         }
         Relationships: []
+      }
+      investigator_reviews: {
+        Row: {
+          analysis_level: string | null
+          analysis_score: number | null
+          created_at: string
+          id: string
+          link_id: string
+          note: string | null
+          reviewer: string
+          verdict: string
+          wrong_reason: string | null
+        }
+        Insert: {
+          analysis_level?: string | null
+          analysis_score?: number | null
+          created_at?: string
+          id?: string
+          link_id: string
+          note?: string | null
+          reviewer?: string
+          verdict: string
+          wrong_reason?: string | null
+        }
+        Update: {
+          analysis_level?: string | null
+          analysis_score?: number | null
+          created_at?: string
+          id?: string
+          link_id?: string
+          note?: string | null
+          reviewer?: string
+          verdict?: string
+          wrong_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investigator_reviews_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       links: {
         Row: {

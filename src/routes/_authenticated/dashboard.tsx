@@ -8,6 +8,8 @@ import { meta } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { listEvidence } from '@/lib/sayyad/evidence.functions';
 import { dashboardStats } from '@/lib/sayyad/dashboard';
+import { reviewStats } from '@/lib/sayyad/reviews';
+import { useReviews } from '@/components/sayyad/reviews';
 import { listCampaigns } from '@/lib/sayyad/campaigns.functions';
 export const Route=createFileRoute('/_authenticated/dashboard')({head:()=>meta('لوحة التحكم','مؤشرات الرصد الحية: الروابط المفحوصة والمشبوهة والجهات المنتحلة وملفات الأدلة.'),component:Dashboard});
 const cfg:ChartConfig={value:{label:'العدد',color:'var(--primary)'}};
@@ -19,13 +21,15 @@ function Bars({data,colors,vertical}:{data:{name:string;value:number;key?:string
   return <ChartContainer config={cfg} className="h-64 w-full"><BarChart data={data} layout={vertical?'vertical':'horizontal'} margin={{left:8,right:8,top:8}}><CartesianGrid vertical={!!vertical} horizontal={!vertical} strokeOpacity={0.15}/>{vertical?<XAxis type="number" allowDecimals={false} tick={tick} reversed/>:<XAxis dataKey="name" tick={tick} interval={0} reversed/>}{vertical?<YAxis type="category" dataKey="name" width={150} orientation="right" tick={tick} interval={0}/>:<YAxis allowDecimals={false} orientation="right" width={30} tick={tick}/>}<ChartTooltip content={<ChartTooltipContent/>}/><Bar dataKey="value" name="العدد" radius={4} fill="var(--color-value)" label={{position:vertical?'left':'top',fill:'var(--foreground)',fontSize:12}}>{colors&&data.map(d=><Cell key={d.name} fill={colors[d.key ?? '']}/>)}</Bar></BarChart></ChartContainer>;
 }
 function Dashboard(){
-  const engine=useEngine(),list=useServerFn(listEvidence),ev=useQuery({queryKey:['evidence'],queryFn:()=>list(),refetchInterval:10000}),camps=useServerFn(listCampaigns),cq=useQuery({queryKey:['campaigns'],queryFn:()=>camps(),refetchInterval:15000});
+  const engine=useEngine(),list=useServerFn(listEvidence),ev=useQuery({queryKey:['evidence'],queryFn:()=>list(),refetchInterval:10000}),camps=useServerFn(listCampaigns),cq=useQuery({queryKey:['campaigns'],queryFn:()=>camps(),refetchInterval:15000}),rq=useReviews();
   if(engine.loading)return <div className="empty-state">جارٍ تحميل المؤشرات…</div>;
   const d=engine.data;if(!d)return <div className="empty-state">لا توجد بيانات بعد</div>;
   const s=dashboardStats(d,ev.data?.length ?? 0,new Date(),cq.data?.campaigns.length ?? 0);
+  const rv=reviewStats(rq.data ?? [],d),dom=(id:string)=>d.links.find(l=>l.id===id)?.domain ?? id;
   const counters:[string,number,string][]= [['عمليات البحث',s.searches,''],['الروابط المفحوصة',s.checked,''],['مشبوه (أصفر)',s.yellow,'yellow'],['خطر (أحمر)',s.red,'red'],['جهات منتحلة',s.entities,''],['ملفات أدلة',s.evidence,''],['الحملات',s.campaigns,'']];
   return <div><div className="page-heading"><div><div className="eyebrow"><LayoutDashboard size={14}/> غرفة العمليات</div><h1>لوحة التحكم</h1><p>مؤشرات حية من نتائج الرصد المحفوظة.</p></div></div>
-    <div className="dash-counters">{counters.map(([l,v,c])=>l==='الحملات'?<Link key={l} to="/campaigns" className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></Link>:<div key={l} className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></div>)}</div>
+    <div className="dash-counters">{counters.map(([l,v,c])=>l==='الحملات'?<Link key={l} to="/campaigns" className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></Link>:<div key={l} className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></div>)}<div className="counter dash-counter"><span>دقة المراجعة</span><strong>{rv.pct===null?'—':`${rv.pct}%`}</strong><small className="text-xs text-muted-foreground">من {rv.total} مراجعة</small></div></div>
+    <div className="dash-grid mb-6">{([['آخر الإنذارات الكاذبة',rv.falseAlarms],['احتيال فات',rv.missed]] as const).map(([t,ids])=><section key={t} className="analysis-section"><h2>{t}</h2>{ids.length?<ul className="text-sm space-y-1">{ids.map(id=><li key={id}><Link to="/analysis" search={{id}} className="text-primary mono" dir="ltr">{dom(id)}</Link></li>)}</ul>:<p className="text-xs text-muted-foreground">لا توجد</p>}</section>)}</div>
     <div className="dash-grid">
       <section className="analysis-section"><h2>توزيع الخطورة</h2><Bars data={s.distribution} colors={riskColor}/></section>
       <section className="analysis-section"><h2>أكثر الجهات انتحالاً</h2><Bars data={s.topEntities} vertical/></section>

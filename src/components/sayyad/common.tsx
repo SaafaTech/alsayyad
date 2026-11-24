@@ -5,9 +5,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from './session';
+import { Wordmark } from './brand';
 import { EngineProvider, etaSeconds, type Job } from './engine-context';
 export const meta=(title:string,description:string)=>({meta:[{title:`${title} | الصيّاد Sayyad`},{name:'description',content:description},{property:'og:title',content:`${title} | الصيّاد Sayyad`},{property:'og:description',content:description},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]});
-export function Brand(){return <div className="flex items-center gap-3 text-primary"><div className="brand-eye"><Eye size={25}/></div><span className="text-xl font-semibold whitespace-nowrap">الصيّاد <span className="text-primary/50">|</span> <span dir="ltr">Sayyad</span></span></div>;}
+export function Brand(){return <div className="flex items-center gap-2 whitespace-nowrap"><Wordmark size="sm"/><span className="text-sm text-primary/70" dir="ltr">| Sayyad</span></div>;}
 export const removedSignal=(signals:unknown)=>!!signals&&typeof signals==='object'&&(signals as Record<string,unknown>)['removed']===true;
 export function RiskBadge({score,level,status,removed}:{score?:number;level?:string;status?:string;removed?:boolean}) {
   if(removed||status==='removed')return <span className="risk unknown"><AlertTriangle size={14}/>محذوفة</span>;

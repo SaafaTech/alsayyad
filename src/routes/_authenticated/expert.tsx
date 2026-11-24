@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { meta, ProgressCard } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { supabase } from '@/integrations/supabase/client';
-import { importCsv,patternStats,accuracy,sample,expertLevel } from '@/lib/sayyad/expert';
+import { importCsv,patternStats,accuracy,sample,expertLevel,expectedMatrix } from '@/lib/sayyad/expert';
 import { defangUrl,defangDomain } from '@/lib/sayyad/campaigns';
 import { scanExpertSample } from '@/lib/sayyad/expert.functions';
 import { rescanLink } from '@/lib/sayyad/engine.functions';
@@ -25,7 +25,7 @@ function Expert(){
   const pending=data.filter(r=>!r.excluded_reason&&!r.link_id);
   const level=(id:string)=>expertLevel(engine.data?.analyses.find(x=>x.link_id===id),engine.data?.links.find(x=>x.id===id)?.status);
   const scannedRows=data.filter(r=>r.link_id);
-  const acc=accuracy(data,level);
+  const acc=accuracy(data,level),mx=expectedMatrix(data,level),opct=(x:number|null)=>x===null?'—':pct(x);
   async function upload(file:File){
     try{const parsed=importCsv(await file.text());const {data:u}=await supabase.auth.getUser();if(!u.user)return;
       const batch=`${file.name} ${new Date().toISOString()}`;
@@ -37,7 +37,7 @@ function Expert(){
   async function rescanAll(){setBusy(true);try{let n=0;for(const r of scannedRows){try{n+=(await rescan({data:{link_id:r.link_id!}})).count ?? 0;}catch{/* scanning or official: skipped */}}toast.success(`أعيد ${n} رابط لقائمة الفحص`);void engine.resume();}catch(e){toast.error(e instanceof Error?e.message:'تعذر إعادة الفحص');}finally{setBusy(false);}}
   return <div><div className="page-heading"><div><div className="eyebrow"><LockKeyhole size={14}/> خاص</div><h1>قياس الدقة</h1><p>القائمة خاصة بحسابك فقط، ولا تظهر في لوحة التحكم أو الحملات.</p></div>
     <label className="inline-flex"><input type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f);e.target.value='';}}/><Button asChild><span><Upload/>رفع CSV</span></Button></label></div>
-    <p className="text-xs text-muted-foreground mb-4">الأعمدة: url، impersonated_entity (اختياري)، note (اختياري).</p>
+    <p className="text-xs text-muted-foreground mb-4">الأعمدة: url، impersonated_entity (اختياري)، note (اختياري)، expected (اختياري: fraud/legit أو احتيال/سليم/رسمي).</p>
     {rows.isPending?<div className="empty-state">جارٍ التحميل…</div>:!data.length?<div className="empty-state"><FlaskConical size={32}/>لم تُرفع روابط بعد</div>:<>
     <section className="analysis-section"><h2>تحليل الأنماط</h2>
       <div className="dash-counters">{[['الإجمالي',stats.total],['مستبعد',stats.excluded],['قابل للفحص',stats.scannable],['منصات مجانية',`${stats.freePct}%`],['يحتوي كلمة علامة',`${stats.brandPct}%`],['معلمات إعلان',`${stats.adPct}%`]].map(([l,v])=><div key={String(l)} className="counter dash-counter"><span>{l}</span><strong>{v}</strong></div>)}</div>
@@ -49,6 +49,10 @@ function Expert(){
       <div className="dash-counters">{[['خطر',acc.red,'red'],['مشبوه',acc.yellow,'yellow'],['آمن',acc.green,'green'],['تعذر الفحص',acc.failed,''],['محذوفة',acc.removed,''],['نسبة الرصد',pct(acc.detection),''],['النسبة الصارمة',pct(acc.strict),'']].map(([l,v,c])=><div key={String(l)} className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></div>)}</div>
       <p className="text-xs text-muted-foreground">نسبة الرصد من {acc.judged} رابط قابل للحكم</p><p className="text-xs text-muted-foreground">الروابط من مختص؛ بعضها قد يكون متوقفاً وقت الفحص</p>
       {acc.greens.length>0&&<><h3 className="text-sm text-primary mt-4 mb-2">روابط صُنفت آمنة (للمراجعة)</h3><ul className="text-xs space-y-1" dir="ltr">{acc.greens.map(u=><li key={u} className="text-start break-all">{defangUrl(u)}</li>)}</ul></>}
+      <h3 className="text-sm text-primary mt-6 mb-2">مقارنة بالإجابة المتوقعة</h3>{mx.caught+mx.missed+mx.legitOk+mx.falseAlarm===0?<p className="text-xs text-muted-foreground">لا توجد روابط بإجابة متوقعة ونتيجة قابلة للحكم</p>:<>
+      <div className="matrix"><div><span>كُشف ✅</span><strong style={{color:'var(--success)'}}>{mx.caught}</strong><small className="text-xs text-muted-foreground">احتيال صُنف خطر/مشبوه</small></div><div><span>فات ❌</span><strong style={{color:'var(--destructive)'}}>{mx.missed}</strong><small className="text-xs text-muted-foreground">احتيال صُنف آمن</small></div><div><span>سليم ✅</span><strong style={{color:'var(--success)'}}>{mx.legitOk}</strong><small className="text-xs text-muted-foreground">سليم صُنف آمن</small></div><div><span>إنذار كاذب ⚠️</span><strong style={{color:'var(--warning)'}}>{mx.falseAlarm}</strong><small className="text-xs text-muted-foreground">سليم صُنف خطر/مشبوه</small></div></div>
+      <div className="dash-counters mt-3"><div className="counter dash-counter"><span>نسبة الكشف</span><strong>{opct(mx.detection)}</strong></div><div className="counter dash-counter"><span>نسبة الإنذار الكاذب</span><strong>{opct(mx.falseRate)}</strong></div></div>
+      {([['فات (للمراجعة)',mx.missedUrls],['إنذار كاذب (للمراجعة)',mx.falseUrls]] as const).map(([t,us])=>us.length>0&&<div key={t}><h3 className="text-sm text-primary mt-4 mb-2">{t}</h3><ul className="text-xs space-y-1" dir="ltr">{us.map(u=><li key={u} className="text-start break-all">{defangUrl(u)}</li>)}</ul></div>)}</>}
     </section>
     <section className="analysis-section mt-6"><h2>المستبعدة</h2><ul className="text-xs space-y-1">{data.filter(r=>r.excluded_reason).slice(0,100).map(r=><li key={r.id} className="flex justify-between gap-3"><span dir="ltr" className="break-all">{defangUrl(r.url)}</span><span className="text-muted-foreground whitespace-nowrap">{r.excluded_reason}</span></li>)}</ul></section>
     </>}

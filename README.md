@@ -27,3 +27,6 @@ npm run dev
 - TypeScript
 - React
 - Tailwind CSS
+
+## Fonts
+- Reem Kufi (wordmark) and IBM Plex Sans Arabic / IBM Plex Mono — loaded from Google Fonts, licensed under the SIL Open Font License 1.1 (https://openfontlicense.org).
