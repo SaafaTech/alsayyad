@@ -42,3 +42,4 @@ use the editor.
 - Removed campaign members keep membership via their latest red analysis_history row; per-member removed/old_score and join edges live in campaigns.signals so no schema change is needed.
 - Brand lives in src/components/sayyad/brand.tsx (inline SVG emblem, Wordmark, once-per-session Splash); the wordmark font Reem Kufi is loaded from Google Fonts under the SIL Open Font License 1.1, so no font files are bundled.
 - Investigator reviews are one row per (link, reviewer), readable by all investigators and writable only by their author; review accuracy excludes expert_sample links like every other aggregate.
+- URL-only lexical signals (lexicalSignals in rules.ts) run for every link and merge into scoreFinding by signal key, so an unscannable link with no evidence still gets a verdict without double counting; shortener domains are never judged themselves, only Cloudflare's final URL.

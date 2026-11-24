@@ -23,7 +23,7 @@ export function normalizeExpert(raw:string,entity?:string|null,note?:string|null
   let u:URL;try{u=new URL(refang(raw));}catch{return {...base,url:raw.trim(),domain:'',platform:'other',excluded_reason:'رابط ناقص'};}
   u.hostname=u.hostname.toLowerCase();const h=u.hostname.replace(/^www\./,'');
   const row={...base,url:u.href,domain:u.hostname,platform:platformFor(u.hostname)};
-  if(!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(u.hostname)||!['http:','https:'].includes(u.protocol))return {...row,excluded_reason:'رابط ناقص'};
+  if(!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.([a-z]{2,}|xn--[a-z0-9-]+)$/.test(u.hostname)&&!/^(\d{1,3}\.){3}\d{1,3}$/.test(u.hostname)||!['http:','https:'].includes(u.protocol))return {...row,excluded_reason:'رابط ناقص'};
   if(/(^|\.)google\.[a-z.]+$/.test(h)&&u.pathname.startsWith('/search')){const q=u.searchParams.get('q');return {...row,note:row.note ?? q ?? null,excluded_reason:'رابط بحث وليس موقعاً'};}
   if(social.some(d=>within(h,d)))return {...row,excluded_reason:'منصة تواصل تحتاج تسجيل دخول'};
   return {...row,excluded_reason:null};
@@ -36,7 +36,7 @@ export function importCsv(text:string):ExpertRow[]{
   return out;
 }
 /** Query/fragment stripped, like manual scans. */
-export const sampleUrl=(url:string)=>{const u=new URL(url);return `${u.protocol}//${u.host}${u.pathname}`;};
+export const sampleUrl=(url:string)=>{const u=new URL(url);return `${u.protocol}//${u.username?`${u.username}@`:''}${u.host}${u.pathname}`;};
 export function sample<T>(items:T[],n:number,rand=Math.random):T[]{const a=[...items];for(let i=a.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[a[i],a[j]]=[a[j]!,a[i]!];}return a.slice(0,Math.max(0,n));}
 const tally=(keys:string[])=>[...keys.reduce((m,k)=>m.set(k,(m.get(k) ?? 0)+1),new Map<string,number>())].map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
 export function patternStats(rows:Pick<ExpertRow,'url_raw'|'url'|'domain'|'platform'|'excluded_reason'>[],keywords:string[]){
@@ -73,4 +73,16 @@ export function expectedMatrix(rows:{link_id:string|null;url:string;expected:str
     if(r.expected==='fraud'){if(flagged)m.caught++;else{m.missed++;missedUrls.push(r.url);}}
     else if(r.expected==='legit'){if(flagged){m.falseAlarm++;falseUrls.push(r.url);}else m.legitOk++;}}
   return {...m,detection:m.caught+m.missed?m.caught/(m.caught+m.missed):null,falseRate:m.falseAlarm+m.legitOk?m.falseAlarm/(m.falseAlarm+m.legitOk):null,missedUrls,falseUrls};
+}
+
+/** Pasted list: one URL per line (defanged accepted), optional ",fraud|legit" label; max 500 unique URLs. */
+export function parsePasted(text:string,max=500):ExpertRow[]{
+  const seen=new Set<string>(),out:ExpertRow[]=[];
+  for(const line of text.split(/\r?\n/)){const t=line.trim();if(!t)continue;const c=t.lastIndexOf(',');const label=c>0?parseExpected(t.slice(c+1)):null;const raw=(label||(c>0&&!t.slice(c+1).trim())?t.slice(0,c):t).trim();if(!raw)continue;
+    const x={...normalizeExpert(raw),expected:label};if(seen.has(x.url))continue;seen.add(x.url);out.push(x);if(out.length>=max)break;}
+  return out;
+}
+const csvCell=(v:string|number|null|undefined)=>{const s=v===null||v===undefined?'':String(v);return /[",\n\r]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;};
+export function resultsCsv(rows:{url:string;level:string|null;score:number|null;top_reason:string|null;final_url:string|null}[]){
+  return ['url,level,score,top_reason,final_url',...rows.map(r=>[r.url,r.level,r.score,r.top_reason,r.final_url].map(csvCell).join(','))].join('\n');
 }

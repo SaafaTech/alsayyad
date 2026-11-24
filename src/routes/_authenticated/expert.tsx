@@ -6,10 +6,12 @@ import { FlaskConical,Upload,ScanLine,LockKeyhole } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { RiskBadge } from '@/components/sayyad/common';
 import { meta, ProgressCard } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { supabase } from '@/integrations/supabase/client';
-import { importCsv,patternStats,accuracy,sample,expertLevel,expectedMatrix } from '@/lib/sayyad/expert';
+import { parsePasted,resultsCsv,importCsv,patternStats,accuracy,sample,expertLevel,expectedMatrix } from '@/lib/sayyad/expert';
 import { defangUrl,defangDomain } from '@/lib/sayyad/campaigns';
 import { scanExpertSample } from '@/lib/sayyad/expert.functions';
 import { rescanLink } from '@/lib/sayyad/engine.functions';
@@ -38,6 +40,7 @@ function Expert(){
   return <div><div className="page-heading"><div><div className="eyebrow"><LockKeyhole size={14}/> خاص</div><h1>قياس الدقة</h1><p>القائمة خاصة بحسابك فقط، ولا تظهر في لوحة التحكم أو الحملات.</p></div>
     <label className="inline-flex"><input type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f);e.target.value='';}}/><Button asChild><span><Upload/>رفع CSV</span></Button></label></div>
     <p className="text-xs text-muted-foreground mb-4">الأعمدة: url، impersonated_entity (اختياري)، note (اختياري)، expected (اختياري: fraud/legit أو احتيال/سليم/رسمي).</p>
+    <PasteBatch rows={data} level={level}/>
     {rows.isPending?<div className="empty-state">جارٍ التحميل…</div>:!data.length?<div className="empty-state"><FlaskConical size={32}/>لم تُرفع روابط بعد</div>:<>
     <section className="analysis-section"><h2>تحليل الأنماط</h2>
       <div className="dash-counters">{[['الإجمالي',stats.total],['مستبعد',stats.excluded],['قابل للفحص',stats.scannable],['منصات مجانية',`${stats.freePct}%`],['يحتوي كلمة علامة',`${stats.brandPct}%`],['معلمات إعلان',`${stats.adPct}%`]].map(([l,v])=><div key={String(l)} className="counter dash-counter"><span>{l}</span><strong>{v}</strong></div>)}</div>
@@ -57,4 +60,39 @@ function Expert(){
     <section className="analysis-section mt-6"><h2>المستبعدة</h2><ul className="text-xs space-y-1">{data.filter(r=>r.excluded_reason).slice(0,100).map(r=><li key={r.id} className="flex justify-between gap-3"><span dir="ltr" className="break-all">{defangUrl(r.url)}</span><span className="text-muted-foreground whitespace-nowrap">{r.excluded_reason}</span></li>)}</ul></section>
     </>}
   </div>;
+}
+
+type Row={id:string;url:string;batch:string|null;link_id:string|null;excluded_reason:string|null;created_at:string};
+/** Paste up to 500 URLs (hidden test set), import like the CSV, queue them, and show live verdicts with CSV export. */
+function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
+  const engine=useEngine(),qc=useQueryClient(),queue=useServerFn(scanExpertSample);
+  const [text,setText]=useState(''),[busy,setBusy]=useState(false),[batch,setBatch]=useState<string|null>(null);
+  const latest=batch ?? [...rows].reverse().find(r=>r.batch?.startsWith('قائمة ملصوقة'))?.batch ?? null;
+  const mine=rows.filter(r=>latest&&r.batch===latest);
+  const result=mine.map(r=>{const a=r.link_id?engine.data?.analyses.find(x=>x.link_id===r.link_id):undefined,l=r.link_id?engine.data?.links.find(x=>x.id===r.link_id):undefined;const lv=r.excluded_reason?'excluded':r.link_id?level(r.link_id):null;
+    return {id:r.id,url:r.url,level:lv,score:a?.score ?? null,top_reason:r.excluded_reason ?? a?.reasons_ar[0] ?? l?.scan_error ?? null,final_url:l?.final_url ?? null,status:l?.status ?? null};});
+  const done=result.filter(r=>r.level&&r.level!=='excluded').length,total=result.filter(r=>r.level!=='excluded').length;
+  const lines=text.split(/\r?\n/).filter(l=>l.trim()).length;
+  async function submit(){setBusy(true);try{
+    const parsed=parsePasted(text);if(!parsed.length){toast.error('لا توجد روابط');return;}
+    const {data:u}=await supabase.auth.getUser();if(!u.user)return;
+    const name=`قائمة ملصوقة ${new Date().toLocaleString('ar-AE')}`;
+    const up=await supabase.from('expert_links').upsert(parsed.map(p=>({...p,batch:name,created_by:u.user.id})),{onConflict:'created_by,url'}).select('id,excluded_reason,link_id');if(up.error)throw up.error;
+    const ids=(up.data ?? []).filter(r=>!r.excluded_reason&&!r.link_id).map(r=>r.id);
+    let queued=0;if(ids.length)queued=(await queue({data:{ids}})).queued;
+    setBatch(name);setText('');toast.success(`استُورد ${parsed.length} رابط، وأضيف ${queued} لقائمة الفحص`);
+    await qc.invalidateQueries({queryKey:['expert-links']});void engine.resume();
+  }catch(e){toast.error(e instanceof Error?e.message:'تعذر استيراد القائمة');}finally{setBusy(false);}}
+  function exportCsv(){const blob=new Blob(['\uFEFF'+resultsCsv(result)],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sayyad-results.csv';a.click();URL.revokeObjectURL(a.href);}
+  const word=(l:string|null)=>l==='red'?'خطر':l==='yellow'?'مشبوه':l==='green'?'آمن':l==='removed'?'محذوفة':l==='failed'?'تعذر الفحص':l==='excluded'?'مستبعد':'بالانتظار';
+  return <section className="analysis-section mb-6"><h2>فحص قائمة روابط</h2>
+    <p className="text-xs text-muted-foreground mb-2">رابط في كل سطر (يُقبل الشكل المعطّل مثل hxxps://site[.]com)، ويمكن إضافة فاصلة ثم fraud أو legit. الحد 500 رابط.</p>
+    <Textarea dir="ltr" rows={6} className="mono text-start" value={text} onChange={e=>setText(e.target.value)} placeholder={'hxxps://example[.]com/pay,fraud\nhttps://example.org,legit'}/>
+    <div className="flex items-center gap-3 mt-3"><Button disabled={busy||!lines||lines>500} onClick={()=>void submit()}><ScanLine/>{busy?'جارٍ الاستيراد…':'استيراد وفحص'}</Button><span className={`text-xs ${lines>500?'text-destructive':'text-muted-foreground'}`}>{lines} / 500</span></div>
+    {latest&&<div className="mt-4"><div className="flex items-center justify-between gap-3 mb-2"><span className="text-sm">{latest} — اكتمل {done} من {total}</span><Button variant="outline" size="sm" disabled={!result.length} onClick={exportCsv}><Upload/>تصدير CSV</Button></div>
+      <div className="h-2 rounded bg-muted overflow-hidden mb-3"><div className="h-full bg-primary transition-all" style={{width:`${total?Math.round(done*100/total):0}%`}}/></div>
+      <ProgressCard job={engine.job} running={engine.running} onStop={engine.stop}/>
+      <div className="overflow-x-auto mt-3"><table className="w-full text-xs"><thead><tr className="text-muted-foreground"><th className="text-start p-1">الرابط</th><th className="text-start p-1">الحكم</th><th className="text-start p-1">السبب الرئيسي</th><th className="text-start p-1">الوجهة النهائية</th></tr></thead>
+      <tbody>{result.map(r=><tr key={r.id} className="border-t border-border"><td dir="ltr" className="p-1 text-start break-all mono">{defangUrl(r.url)}</td><td className="p-1 whitespace-nowrap">{r.level==='red'||r.level==='yellow'||r.level==='green'?<RiskBadge level={r.level} score={r.score ?? 0}/>:word(r.level)}</td><td className="p-1">{r.top_reason ?? '—'}</td><td dir="ltr" className="p-1 text-start break-all mono">{r.final_url&&r.final_url!==r.url?defangUrl(r.final_url):'—'}</td></tr>)}</tbody></table></div></div>}
+  </section>;
 }
