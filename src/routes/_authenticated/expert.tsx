@@ -158,7 +158,7 @@ function Networks(){
       const ip=ips.length===1?ips[0] ?? null:null;
       const nodes:CampaignNode[]=members.map(l=>{const a=ana(l.id),m=sig.members?.[l.id],removed=!!m?.removed||l.status==='removed'||removedSignal(a?.signals);return {id:l.id,domain:l.domain,removed,score:a?.score ?? m?.score ?? null,oldScore:m?.old_score ?? null,caseNo:evidence.data?.find(e=>e.link_id===l.id)?.case_no ?? null};});
       const files=(evidence.data ?? []).filter(e=>members.some(l=>l.id===e.link_id));
-      return <CampaignCard key={i} title={ent?tf("شبكة انتحال {0}",tr(ent.name_ar)):tr("شبكة غير مصنفة")} badge={tr("من بيانات المختص — ليست من صيد الصيّاد")} entity={ent} nodes={nodes} sig={sig} linkCount={n.link_count} ip={ip} files={files} onAwareness={()=>setMsg(awarenessMessage(ent,members.map(l=>l.domain)))}/>;})}
+      return <CampaignCard key={i} title={ent?tf("شبكة انتحال {0}",tr(ent.name_ar)):tr("شبكة غير مصنفة")} badge={tr("من بيانات المختص — ليست من صيد الصيّاد")} entity={ent} nodes={nodes} sig={sig} linkCount={n.link_count} ip={ip} files={files} showPlaceholder={false} onAwareness={()=>setMsg(awarenessMessage(ent,members.map(l=>l.domain)))}/>;})}
     <AwarenessDialog msg={msg} onClose={()=>setMsg(null)}/>
   </section>;
 }
