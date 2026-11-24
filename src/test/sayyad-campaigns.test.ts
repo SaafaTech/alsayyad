@@ -34,3 +34,11 @@ describe('Expert import',()=>{
   it('pattern stats count ad params and free platforms',()=>{const rows=importCsv('url\nhttps://a.example.com/?gclid=1\nhttps://x.wixsite.com/salik\nhttps://t.me/x');const s=patternStats(rows,['salik']);expect(s.total).toBe(3);expect(s.excluded).toBe(1);expect(s.adPct).toBe(50);expect(s.freePct).toBe(50);});
   it('accuracy rates and sample URLs drop query strings',()=>{const a=accuracy([{link_id:'1',url:'u1'},{link_id:'2',url:'u2'},{link_id:'3',url:'u3'},{link_id:'4',url:'u4'},{link_id:null,url:'u5'}],id=>({'1':'red','2':'yellow','3':'green','4':'failed'})[id] ?? null);expect(a.scanned).toBe(4);expect(a.judged).toBe(3);expect(a.detection).toBeCloseTo(2/3);expect(a.strict).toBeCloseTo(1/3);expect(a.greens).toEqual(['u3']);expect(sampleUrl('https://a.example.com/p?token=1#f')).toBe('https://a.example.com/p');});
 });
+import {usefulTokens} from '@/lib/sayyad/expert';
+describe('usefulTokens',()=>{it('drops official, generic, short and gang tokens',()=>{
+  const rows=['licenseplate.example.com','licenseplate-pay.example.net','legalandrewandhopkins.example.com','www.example.gov.ae','abc.example.org'].map(domain=>({domain}));
+  const t=usefulTokens(rows,['andrewandhopkins'],d=>d.endsWith('gov.ae'));
+  const names=t.map(x=>x.name);
+  expect(t.find(x=>x.name==='licenseplate')?.value).toBe(2);
+  expect(names).not.toContain('legalandrewandhopkins');expect(names).not.toContain('abc');expect(names).not.toContain('www');
+});});

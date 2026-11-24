@@ -39,18 +39,25 @@ export function importCsv(text:string):ExpertRow[]{
 export const sampleUrl=(url:string)=>{const u=new URL(url);return `${u.protocol}//${u.username?`${u.username}@`:''}${u.host}${u.pathname}`;};
 export function sample<T>(items:T[],n:number,rand=Math.random):T[]{const a=[...items];for(let i=a.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[a[i],a[j]]=[a[j]!,a[i]!];}return a.slice(0,Math.max(0,n));}
 const tally=(keys:string[])=>[...keys.reduce((m,k)=>m.set(k,(m.get(k) ?? 0)+1),new Map<string,number>())].map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
-export function patternStats(rows:Pick<ExpertRow,'url_raw'|'url'|'domain'|'platform'|'excluded_reason'>[],keywords:string[]){
+const GENERIC_TOKENS=new Set(['www','com','net','org','ae','gov','app','site','online','netlify','vercel','wix','google','sites','html','index','pages']);
+/** Repeated name tokens worth turning into hunt phrases: drop official domains, generic/short tokens and gang-pattern labels (and prefixed variants). */
+export function usefulTokens(rows:{domain:string}[],gangKeys:string[],isOfficial:(domain:string)=>boolean=()=>false){
+  const gang=gangKeys.map(k=>k.toLowerCase()).filter(k=>k.length>=4);
+  const toks=rows.filter(r=>!isOfficial(r.domain)).flatMap(r=>{const suf=getPublicSuffix(r.domain) ?? '';return r.domain.toLowerCase().slice(0,r.domain.length-suf.length).split(/[.\-_\d]+/);})
+    .filter(t=>/^\p{L}+$/u.test(t)&&t.length>=4&&!GENERIC_TOKENS.has(t)&&!gang.some(g=>t===g||t.endsWith(g)||t.includes(g)));
+  return tally(toks);
+}
+export function patternStats(rows:Pick<ExpertRow,'url_raw'|'url'|'domain'|'platform'|'excluded_reason'>[],keywords:string[],isOfficial:(domain:string)=>boolean=()=>false){
   const ok=rows.filter(r=>!r.excluded_reason);const pct=(n:number)=>ok.length?Math.round(n*100/ok.length):0;
   const kws=keywords.map(k=>k.toLowerCase()).filter(k=>k.length>=3);
-  const tokens=ok.flatMap(r=>{const suf=getPublicSuffix(r.domain) ?? '';return r.domain.slice(0,r.domain.length-suf.length).split(/[.\-_\d]+/).filter(t=>t.length>=3&&t!=='www');});
   const groups=new Map<string,string[]>();for(const r of ok){const k=namePattern(r.url,r.domain,r.platform);if(k)groups.set(k,[...(groups.get(k) ?? []),r.domain]);}
-  return {total:rows.length,excluded:rows.length-ok.length,scannable:ok.length,
+  const base={total:rows.length,excluded:rows.length-ok.length,scannable:ok.length,
     byPlatform:tally(ok.map(r=>r.platform)),byTld:tally(ok.map(r=>getPublicSuffix(r.domain) ?? '—')),
     freePct:pct(ok.filter(r=>freePlatform(r.platform)).length),
     brandPct:pct(ok.filter(r=>kws.some(k=>r.domain.includes(k))).length),
     adPct:pct(ok.filter(r=>/[?&](gad_source|gclid|gbraid)=/i.test(r.url_raw)).length),
-    topTokens:tally(tokens).slice(0,15),
     nameGroups:[...groups].filter(([,d])=>new Set(d).size>=2).map(([key,d])=>({key:key.split('|')[1] ?? key,domains:[...new Set(d)]})).sort((a,b)=>b.domains.length-a.domains.length)};
+  return {...base,topTokens:usefulTokens(ok,base.nameGroups.map(g=>g.key),isOfficial)};
 }
 /** Classify one expert row: unverified fallbacks and error/unscannable links are 'failed', taken-down pages 'removed'. */
 export function expertLevel(a:{level:string;signals:unknown}|undefined,status:string|undefined){

@@ -16,9 +16,9 @@ import { parsePasted,resultsCsv,importCsv,patternStats,accuracy,sample,expertLev
 import { defangUrl,defangDomain } from '@/lib/sayyad/campaigns';
 import { scanExpertSample } from '@/lib/sayyad/expert.functions';
 import { rescanLink } from '@/lib/sayyad/engine.functions';
-import { addPhrase } from '@/lib/sayyad/phrases.functions';
 import { phraseKey } from '@/lib/sayyad/phrases';
-import { platformLabel } from '@/lib/sayyad/rules';
+import { platformLabel, officialDestination } from '@/lib/sayyad/rules';
+import { PhrasesSheet } from '@/components/sayyad/phrases-sheet';
 import { BarList } from '@/components/sayyad/bar-list';
 export const Route=createFileRoute('/_authenticated/expert')({head:()=>meta(tr("تدقيق خاص"),tr("فرز البلاغات وتحليل الأنماط وقياس دقة الرصد — خاص بحسابك.")),component:Expert});
 const pct=(x:number)=>`${Math.round(x*100)}%`;
@@ -29,11 +29,11 @@ function Tile({tone,icon,label,value,sub}:{tone:'red'|'amber'|'grey'|'green';ico
   return <div className={`x-tile t-${tone}`}><span className="x-badge">{icon}</span><span className="x-label">{label}</span><strong>{value}</strong>{sub&&<small>{sub}</small>}</div>;
 }
 function Expert(){
-  const engine=useEngine(),qc=useQueryClient(),queue=useServerFn(scanExpertSample),rescan=useServerFn(rescanLink),add=useServerFn(addPhrase);
+  const engine=useEngine(),qc=useQueryClient(),queue=useServerFn(scanExpertSample),rescan=useServerFn(rescanLink);
   const rows=useQuery({queryKey:['expert-links'],queryFn:async()=>{const r=await supabase.from('expert_links').select('*').order('created_at');if(r.error)throw r.error;return r.data;}});
-  const [n,setN]=useState(100),[busy,setBusy]=useState(false),[openGroup,setOpenGroup]=useState<string|null>(null),[added,setAdded]=useState<Set<string>>(new Set());
+  const [n,setN]=useState(100),[busy,setBusy]=useState(false),[openGroup,setOpenGroup]=useState<string|null>(null);
   const data=rows.data ?? [];
-  const stats=useMemo(()=>patternStats(data,(engine.data?.entities ?? []).flatMap(e=>e.brand_keywords)),[data,engine.data?.entities]);
+  const stats=useMemo(()=>patternStats(data,(engine.data?.entities ?? []).flatMap(e=>e.brand_keywords),d=>!!officialDestination(d,engine.data?.entities ?? [])),[data,engine.data?.entities]);
   const pending=data.filter(r=>!r.excluded_reason&&!r.link_id);
   const level=(id:string)=>expertLevel(engine.data?.analyses.find(x=>x.link_id===id),engine.data?.links.find(x=>x.id===id)?.status);
   const scannedRows=data.filter(r=>r.link_id);
@@ -47,10 +47,9 @@ function Expert(){
       toast.success(tf("تم استيراد {0} رابط",parsed.length));await qc.invalidateQueries({queryKey:['expert-links']});
     }catch(e){toast.error(e instanceof Error?e.message:tr("تعذر قراءة الملف"));}
   }
-  const [adv,setAdv]=useState(false);
+  const [adv,setAdv]=useState(false),[sheet,setSheet]=useState(false),[draft,setDraft]=useState(''),[allWords,setAllWords]=useState(false);
   async function scan(){setBusy(true);try{const pick=sample(pending,Math.min(n,pending.length));const r=await queue({data:{ids:pick.map(p=>p.id)}});toast.success(tf("أضيف {0} رابط لقائمة الفحص",r.queued));await qc.invalidateQueries({queryKey:['expert-links']});void engine.resume();}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر بدء الفحص"));}finally{setBusy(false);}}
   async function rescanAll(){setBusy(true);try{let n=0;for(const r of scannedRows){try{n+=(await rescan({data:{link_id:r.link_id!}})).count ?? 0;}catch{/* scanning or official: skipped */}}toast.success(tf("أعيد {0} رابط لقائمة الفحص",n));void engine.resume();}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر إعادة الفحص"));}finally{setBusy(false);}}
-  async function addWord(w:string){try{await add({data:{phrase:w,entity_id:null}});setAdded(s=>new Set(s).add(phraseKey(w)));toast.success(tr("أُضيفت كعبارة صيد"));void qc.invalidateQueries({queryKey:['workspace']});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر الحفظ"));}}
   const dead=acc.removed+acc.failed,deadPct=acc.scanned?Math.round(dead*100/acc.scanned):0;
   const noExpected=mx.caught+mx.missed+mx.legitOk+mx.falseAlarm===0;
   const fileInput=<label className="inline-flex"><input type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f);e.target.value='';}}/><Button asChild variant="outline"><span><Upload/>{tr("رفع CSV")}</span></Button></label>;
@@ -87,7 +86,8 @@ function Expert(){
           {openGroup&&<ul className="x-domains" dir="ltr">{stats.nameGroups.find(g=>g.key===openGroup)?.domains.map(d=><li key={d}>{defangDomain(d)}</li>)}</ul>}</>:<p className="dash-none">{tr("لا توجد مجموعات")}</p>}</div>
         <div><h3 className="x-sub">{tr("المنصات")}</h3><BarList data={stats.byPlatform.map(p=>({name:platformLabel(p.name),value:p.value}))} tone="amber"/></div>
       </div>
-      <h3 className="x-sub mt-5">{tr("كلمات متكررة")}</h3>{stats.topTokens.length?<div className="x-chips">{stats.topTokens.map(t=>{const has=phraseKeys.has(phraseKey(t.name))||added.has(phraseKey(t.name));return <span key={t.name} className="x-chip" dir="ltr">{t.name} ×{t.value}{!has&&t.name.trim().length>=3&&<button type="button" className="x-plus" title={tr("أضف كعبارة صيد")} aria-label={tr("أضف كعبارة صيد")} onClick={()=>void addWord(t.name)}><Plus size={12}/></button>}</span>;})}</div>:<p className="dash-none">—</p>}
+      <h3 className="x-sub mt-5">{tr("كلمات متكررة في أسماء المواقع")}</h3><p className="text-xs text-muted-foreground mb-2">{tr("اضغط كلمة لتحويلها إلى عبارة صيد")}</p>{(()=>{const freq=stats.topTokens.filter(t=>t.value>=2),shown=allWords?stats.topTokens:freq;return <>{shown.length?<div className="x-chips">{shown.map(t=>{const has=phraseKeys.has(phraseKey(t.name));return <button type="button" key={t.name} className="x-chip" dir="ltr" title={tr("اكتبها كعبارة يبحث بها الضحية ثم احفظها")} onClick={()=>{setDraft(t.name);setSheet(true);}}>{t.name} ×{t.value}{!has&&<span className="x-plus" aria-hidden><Plus size={12}/></span>}</button>;})}</div>:<p className="dash-none">{tr("لا توجد كلمات متكررة مفيدة")}</p>}{stats.topTokens.length>freq.length&&<button type="button" className="text-xs text-primary mt-2" onClick={()=>setAllWords(v=>!v)}>{allWords?tr("عرض أقل"):tf("عرض كل الكلمات ({0})",stats.topTokens.length)}</button>}</>;})()}
+      <PhrasesSheet open={sheet} onOpenChange={setSheet} phrases={engine.data?.phrases ?? []} entities={engine.data?.entities ?? []} draft={draft} setDraft={setDraft}/>
     </Card>
     <Card n={tr("٤")} icon={<Target size={16}/>} title={tr("قياس الدقة")}>
       <div className="x-tiles">
