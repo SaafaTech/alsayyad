@@ -1,9 +1,10 @@
 import {describe,it,expect} from 'vitest';
-import {cleanUrl,officialMatch,scoreFinding,riskLevel,platformFor,chainDestinations,normalizePhone,type AiFinding,type Entity} from '@/lib/sayyad/rules';
+import {cleanUrl,officialMatch,scoreFinding,riskLevel,platformFor,chainDestinations,normalizePhone,scanSubmissionSchema,type AiFinding,type Entity} from '@/lib/sayyad/rules';
 const salik:Entity={id:'00000000-0000-4000-8000-000000000001',name_ar:'سالك',name_en:'Salik',category:'transport',official_domains:['salik.ae'],official_phones:['80072545','97142335000','97142335005'],brand_keywords:['سالك','salik'],created_at:'2026-11-24T00:00:00Z'};
 const ai:AiFinding={impersonated_entity:null,impersonation_confidence:0,asks_payment_or_card:false,asks_sensitive_data:false,phones_found:[],summary_ar:''};
 const score=(options:Partial<Parameters<typeof scoreFinding>[0]>={})=>scoreFinding({url:'https://merchant.example',entities:[salik],ai,age:null,mapsPhone:null,platform:'other',...options});
 describe('Sayyad investigator rules',()=>{
+ it('reads the Cloudflare scan uuid when result is a public report URL',()=>{expect(scanSubmissionSchema.parse({uuid:'182bd5e5-6e1a-4fe4-a799-aa6d9a6ab26e',result:'https://radar.cloudflare.com/scan/report'}).uuid).toBe('182bd5e5-6e1a-4fe4-a799-aa6d9a6ab26e');});
  it('cleans Google url redirects without making requests',()=>expect(cleanUrl('https://www.google.com/url?q=https%3A%2F%2Fsalik.ae%2F')).toBe('https://salik.ae/'));
  it('cleans Google goto redirects without making requests',()=>expect(cleanUrl('https://google.com/goto?url=https%3A%2F%2Fsalik.ae')).toBe('https://salik.ae/'));
  it('accepts exact official domains and their subdomains',()=>{expect(officialMatch('salik.ae',[salik])?.entity?.id).toBe(salik.id);expect(officialMatch('www.salik.ae',[salik])?.entity?.id).toBe(salik.id);expect(officialMatch('salik.ae.example',[salik])).toBeNull();});

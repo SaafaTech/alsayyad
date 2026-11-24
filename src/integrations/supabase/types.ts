@@ -173,6 +173,7 @@ export type Database = {
           maps_phone: string | null
           parent_link_id: string | null
           platform: string
+          processing_started_at: string | null
           rank: number | null
           scan_error: string | null
           scan_started_at: string | null
@@ -193,6 +194,7 @@ export type Database = {
           maps_phone?: string | null
           parent_link_id?: string | null
           platform?: string
+          processing_started_at?: string | null
           rank?: number | null
           scan_error?: string | null
           scan_started_at?: string | null
@@ -213,6 +215,7 @@ export type Database = {
           maps_phone?: string | null
           parent_link_id?: string | null
           platform?: string
+          processing_started_at?: string | null
           rank?: number | null
           scan_error?: string | null
           scan_started_at?: string | null
@@ -288,6 +291,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_analysis: { Args: { _link_id: string }; Returns: boolean }
       claim_scan: { Args: { _link_id: string }; Returns: boolean }
     }
     Enums: {

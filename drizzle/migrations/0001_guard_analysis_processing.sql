@@ -1,0 +1,3 @@
+ALTER TABLE public.links ADD COLUMN processing_started_at timestamptz;
+CREATE FUNCTION public.claim_analysis(_link_id uuid) RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path=public AS $$ BEGIN IF auth.uid() IS NULL THEN RETURN false; END IF; UPDATE public.links SET processing_started_at=now() WHERE id=_link_id AND status='scanning' AND processing_started_at IS NULL AND NOT EXISTS(SELECT 1 FROM public.analyses WHERE link_id=_link_id); RETURN FOUND; END $$;
+REVOKE ALL ON FUNCTION public.claim_analysis(uuid) FROM PUBLIC,anon; GRANT EXECUTE ON FUNCTION public.claim_analysis(uuid) TO authenticated;

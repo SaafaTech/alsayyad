@@ -34,4 +34,4 @@ use the editor.
 - Start Cloudflare scans with a database claim, then poll from a sequential browser queue; this prevents long server waits and concurrent scan starts.
 - Store only derived investigation evidence, not raw DOM or screenshots; screenshots are retrieved through an authenticated Cloudflare-only proxy.
 - Keep signed-in screens under the pathless authenticated layout and check authentication on every server function; route access is not the RPC security boundary.
-- Cache the IANA RDAP bootstrap in the database and allow registry origins only from that bootstrap; never follow upstream HTTP redirects.
+- Authenticate the cached IANA RDAP bootstrap with a server-only HMAC before allowing registry origins; database edits must never broaden the outbound allowlist, and provider redirects are never followed.

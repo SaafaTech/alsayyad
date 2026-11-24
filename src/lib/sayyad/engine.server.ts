@@ -1,3 +1,4 @@
+import { bootstrapSchema, signedBootstrap, verifiedBootstrap } from './registry-cache.server';
 import { generateResponse } from '@lovable.dev/ai-gateway';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -5,7 +6,7 @@ import type { Database, Tables } from '@/integrations/supabase/types';
 import { aiSchema, cleanUrl, hostname, officialMatch, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, type Entity } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
-export function requireData<T>(result:{data:T|null;error:unknown}):T { const data=must(result);if(data===null)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
+export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { const data=must(result);if(data===null||data===undefined)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
 // Only this transport performs investigation HTTP. Never follow provider redirects.
 export async function providerFetch(url:string,init:RequestInit={},rdapOrigins:string[]=[]) {
   const u=new URL(url);
@@ -13,7 +14,7 @@ export async function providerFetch(url:string,init:RequestInit={},rdapOrigins:s
     u.hostname==='google.serper.dev' || u.hostname==='api.cloudflare.com' || u.hostname==='crt.sh' ||
     (u.hostname==='data.iana.org' && u.pathname==='/rdap/dns.json') || u.hostname==='rdap.verisign.com' || rdapOrigins.includes(u.origin));
   if(!permitted)throw new Error('تم منع اتصال غير مسموح');
-  return fetch(url,{...init,redirect:'manual',signal:init.signal ?? AbortSignal.timeout(20000)});
+  return fetch(url,{...init,redirect:'manual',signal:init.signal ?? AbortSignal.timeout(u.hostname==='crt.sh'||u.hostname==='rdap.verisign.com'||rdapOrigins.includes(u.origin)?7000:20000)});
 }
 export function cfBase(account:string) {if(!/^[a-f0-9]{32}$/i.test(account))throw new Error('إعداد حساب Cloudflare غير صالح');return `https://api.cloudflare.com/client/v4/accounts/${account}/urlscanner/v2`;}
 export function cfHeaders(token:string){return {'Authorization':`Bearer ${token}`,'Content-Type':'application/json'};}
@@ -45,9 +46,8 @@ export async function search(db:Db,userId:string,phrase:string,source:'google'|'
   } else for(const [i,item] of (result.places ?? []).entries()) if(item.website)if(await addLink(db,{url:item.website,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',maps_phone:item.phoneNumber?normalizePhone(item.phoneNumber):null},es))count++;
   must(await db.from('hunts').update({results_count:count}).eq('id',hunt.id));return {hunt_id:hunt.id,results_count:count};
 }
-const bootstrapSchema=z.object({services:z.array(z.tuple([z.array(z.string()),z.array(z.string())]))});
 const rdapSchema=z.object({events:z.array(z.object({eventAction:z.string(),eventDate:z.string()})).optional()});
-export async function domainAge(db:Db,domain:string,platform:string) {
+export async function domainAge(db:Db,domain:string,platform:string,cacheSecret:string) {
   if(freePlatform(platform))return {domain_age_days:null,age_source:'unavailable' as const};
   domain=registrationDomain(domain);const tld=domain.split('.').at(-1) ?? '';
   const age=(date:string)=>{const time=Date.parse(date);return Number.isFinite(time)&&time<=Date.now()?Math.floor((Date.now()-time)/86400000):null;};
@@ -56,8 +56,8 @@ export async function domainAge(db:Db,domain:string,platform:string) {
     if(tld==='com'||tld==='net')bases=[`https://rdap.verisign.com/${tld}/v1/`];
     else {
       const cached=must(await db.from('engine_cache').select('*').eq('key','iana-rdap').gt('expires_at',new Date().toISOString()).maybeSingle());
-      let json:unknown=cached?.value;
-      if(!json){const r=await providerFetch('https://data.iana.org/rdap/dns.json');if(!r.ok)throw new Error();json=await r.json();const valid=bootstrapSchema.parse(json);must(await db.from('engine_cache').upsert({key:'iana-rdap',value:valid,expires_at:new Date(Date.now()+86400000).toISOString()}));}
+      let json=await verifiedBootstrap(cached?.value,cacheSecret);
+      if(!json){const r=await providerFetch('https://data.iana.org/rdap/dns.json');if(!r.ok)throw new Error();json=bootstrapSchema.parse(await r.json());const valid=await signedBootstrap(json,cacheSecret);must(await db.from('engine_cache').upsert({key:'iana-rdap',value:valid,expires_at:new Date(Date.now()+86400000).toISOString()}));}
       const bootstrap=bootstrapSchema.parse(json);bases=bootstrap.services.find(([tlds])=>tlds.includes(tld))?.[1].filter(b=>b.startsWith('https://')) ?? [];origins=bases.map(b=>new URL(b).origin);
     }
     for(const base of bases){const r=await providerFetch(`${base.replace(/\/?$/,'/')}domain/${encodeURIComponent(domain)}`,{},origins);if(!r.ok)continue;const date=rdapSchema.parse(await r.json()).events?.find(e=>e.eventAction==='registration')?.eventDate;if(date && age(date)!==null)return {domain_age_days:age(date),age_source:'rdap' as const};}
@@ -87,12 +87,12 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
   if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return;}
   const status=Number(report.page.status);
   if(report.task?.success===false || !status || status>=400) {must(await db.from('links').update({status:'unscannable',scan_error:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));return;}
-  const dom=await providerFetch(`${base}/dom/${link.scan_uuid}`,{headers});if(!dom.ok)throw new Error('تعذر قراءة محتوى تقرير Cloudflare');
+  const dom=await providerFetch(`${base}/dom/${link.scan_uuid}`,{headers:{...headers,Accept:'text/plain'}});if(!dom.ok)throw new Error(`تعذر قراءة محتوى تقرير Cloudflare (HTTP ${dom.status})`);
   const domRaw=(await dom.text()).slice(0,500000);
   const text=domRaw.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,6000);
   const outgoing=(report.data?.links ?? []).flatMap(l=>{try{return [cleanUrl(new URL(l.href,finalUrl).href)];}catch{return [];}});
   const outgoingDomains=[...new Set(outgoing.map(hostname))].filter(d=>d!==finalDomain);
-  const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform);
+  const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform,headers['Authorization'] ?? '');
   const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:report.page.title ?? '',page_text:text,outgoing_domains:outgoingDomains,entities:es});
   const scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
   must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:report.page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...redirect],ai_summary_ar:ai.summary_ar}));

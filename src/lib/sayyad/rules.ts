@@ -11,6 +11,7 @@ export const aiSchema = z.object({
 export type AiFinding = z.infer<typeof aiSchema>;
 export const linkIdSchema = z.object({ link_id: z.string().uuid() });
 export const phraseSchema = z.object({ phrase: z.string().trim().min(1).max(300) });
+export const scanSubmissionSchema = z.object({uuid:z.string().uuid()});
 export function cleanUrl(raw: string): string {
   let u = new URL(raw.includes('://') ? raw : `https://${raw}`);
   for (let i=0; i<3; i++) {
