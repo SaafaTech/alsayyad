@@ -210,3 +210,10 @@ html[dir="ltr"] .ind-link-text{text-align:left}
 .ind-urls{max-height:200px;overflow:auto;padding:8px 12px;border-top:1px solid var(--border);font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;display:flex;flex-direction:column;gap:6px}
 @media(max-width:640px){.ind-grid{grid-template-columns:1fr}}
 @media print{.ind-card{break-inside:avoid;background:none!important;border-color:#ccc!important}.ind-link{border-color:#ccc!important}}
+.c-summary.analysis-section{padding:20px!important}
+.c-summary dl{gap:14px}
+.c-summary dl>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.c-summary dt{font-size:12px}
+.c-summary dd{font-size:14px;font-weight:500;overflow-wrap:anywhere}
+.c-summary dl+div{gap:12px!important;margin-top:16px!important}
+.c-summary dl+div>*{width:100%}
