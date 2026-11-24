@@ -1,0 +1,58 @@
+import { getPublicSuffix } from 'tldts';
+import { platformFor, freePlatform } from './rules';
+import { namePattern } from './campaigns';
+/** Minimal RFC4180-style CSV parser (quoted fields, escaped quotes, CRLF, BOM). */
+export function parseCsv(text:string):string[][]{
+  const s=text.replace(/^\uFEFF/,'');const rows:string[][]=[];let row:string[]=[],f='',q=false;
+  for(let i=0;i<s.length;i++){const c=s[i]!;
+    if(q){if(c==='"'){if(s[i+1]==='"'){f+='"';i++;}else q=false;}else f+=c;}
+    else if(c==='"')q=true;else if(c===','){row.push(f);f='';}
+    else if(c==='\n'||c==='\r'){if(c==='\r'&&s[i+1]==='\n')i++;row.push(f);rows.push(row);row=[];f='';}
+    else f+=c;}
+  if(f||row.length){row.push(f);rows.push(row);}
+  return rows.filter(r=>r.some(x=>x.trim()));
+}
+export function refang(raw:string){let u=raw.trim().replace(/^hxxps/i,'https').replace(/^hxxp/i,'http').replace(/\[\.\]|\(\.\)/g,'.').replace(/\[:\]/g,':');if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(u))u=`https://${u}`;return u;}
+export type ExpertRow={url_raw:string;url:string;domain:string;platform:string;impersonated_entity:string|null;note:string|null;excluded_reason:string|null};
+const social=['facebook.com','instagram.com','tiktok.com','x.com','t.me'];
+const within=(h:string,d:string)=>h===d||h.endsWith(`.${d}`);
+export function normalizeExpert(raw:string,entity?:string|null,note?:string|null):ExpertRow{
+  const base={url_raw:raw,impersonated_entity:entity?.trim()||null,note:note?.trim()||null};
+  let u:URL;try{u=new URL(refang(raw));}catch{return {...base,url:raw.trim(),domain:'',platform:'other',excluded_reason:'رابط ناقص'};}
+  u.hostname=u.hostname.toLowerCase();const h=u.hostname.replace(/^www\./,'');
+  const row={...base,url:u.href,domain:u.hostname,platform:platformFor(u.hostname)};
+  if(!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(u.hostname)||!['http:','https:'].includes(u.protocol))return {...row,excluded_reason:'رابط ناقص'};
+  if(/(^|\.)google\.[a-z.]+$/.test(h)&&u.pathname.startsWith('/search')){const q=u.searchParams.get('q');return {...row,note:row.note ?? q ?? null,excluded_reason:'رابط بحث وليس موقعاً'};}
+  if(social.some(d=>within(h,d)))return {...row,excluded_reason:'منصة تواصل تحتاج تسجيل دخول'};
+  return {...row,excluded_reason:null};
+}
+export function importCsv(text:string):ExpertRow[]{
+  const rows=parseCsv(text);const head=(rows[0] ?? []).map(h=>h.trim().toLowerCase());
+  const ui=head.indexOf('url');if(ui<0)throw new Error('يجب أن يحتوي الملف على عمود url');
+  const ei=head.indexOf('impersonated_entity'),ni=head.indexOf('note');const seen=new Set<string>(),out:ExpertRow[]=[];
+  for(const r of rows.slice(1)){const raw=r[ui]?.trim();if(!raw)continue;const x=normalizeExpert(raw,ei>=0?r[ei]:null,ni>=0?r[ni]:null);if(seen.has(x.url))continue;seen.add(x.url);out.push(x);}
+  return out;
+}
+/** Query/fragment stripped, like manual scans. */
+export const sampleUrl=(url:string)=>{const u=new URL(url);return `${u.protocol}//${u.host}${u.pathname}`;};
+export function sample<T>(items:T[],n:number,rand=Math.random):T[]{const a=[...items];for(let i=a.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[a[i],a[j]]=[a[j]!,a[i]!];}return a.slice(0,Math.max(0,n));}
+const tally=(keys:string[])=>[...keys.reduce((m,k)=>m.set(k,(m.get(k) ?? 0)+1),new Map<string,number>())].map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
+export function patternStats(rows:Pick<ExpertRow,'url_raw'|'url'|'domain'|'platform'|'excluded_reason'>[],keywords:string[]){
+  const ok=rows.filter(r=>!r.excluded_reason);const pct=(n:number)=>ok.length?Math.round(n*100/ok.length):0;
+  const kws=keywords.map(k=>k.toLowerCase()).filter(k=>k.length>=3);
+  const tokens=ok.flatMap(r=>{const suf=getPublicSuffix(r.domain) ?? '';return r.domain.slice(0,r.domain.length-suf.length).split(/[.\-_\d]+/).filter(t=>t.length>=3&&t!=='www');});
+  const groups=new Map<string,string[]>();for(const r of ok){const k=namePattern(r.url,r.domain,r.platform);if(k)groups.set(k,[...(groups.get(k) ?? []),r.domain]);}
+  return {total:rows.length,excluded:rows.length-ok.length,scannable:ok.length,
+    byPlatform:tally(ok.map(r=>r.platform)),byTld:tally(ok.map(r=>getPublicSuffix(r.domain) ?? '—')),
+    freePct:pct(ok.filter(r=>freePlatform(r.platform)).length),
+    brandPct:pct(ok.filter(r=>kws.some(k=>r.domain.includes(k))).length),
+    adPct:pct(ok.filter(r=>/[?&](gad_source|gclid|gbraid)=/i.test(r.url_raw)).length),
+    topTokens:tally(tokens).slice(0,15),
+    nameGroups:[...groups].filter(([,d])=>new Set(d).size>=2).map(([key,d])=>({key:key.split('|')[1] ?? key,domains:[...new Set(d)]})).sort((a,b)=>b.domains.length-a.domains.length)};
+}
+export function accuracy(rows:{link_id:string|null;url:string}[],level:(linkId:string)=>string|null){
+  const c={red:0,yellow:0,green:0,failed:0};const greens:string[]=[];
+  for(const r of rows){if(!r.link_id)continue;const l=level(r.link_id);if(l==='red'||l==='yellow'||l==='green'){c[l]++;if(l==='green')greens.push(r.url);}else if(l==='failed')c.failed++;}
+  const scanned=c.red+c.yellow+c.green+c.failed;
+  return {...c,scanned,detection:scanned?(c.red+c.yellow)/scanned:0,strict:scanned?c.red/scanned:0,greens};
+}

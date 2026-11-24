@@ -3,6 +3,8 @@ import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
 import { linkIdSchema, phraseSchema, cleanUrl, scanSubmissionSchema, officialDestination, hostname } from './rules';
 import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis, scanSubmissionUrl, scanRefusalReason, scanRefusalMessage } from './engine.server';
+import type { Db } from './engine.server';
+import { maybeRebuildCampaigns } from './campaigns.server';
 export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
   const db=context.supabase;
   const [es,phrases,links,analyses,hunts]=await Promise.all([db.from('entities').select('*').order('name_ar'),db.from('search_phrases').select('*').eq('active',true),db.from('links').select('*').order('first_seen_at',{ascending:false}),db.from('analyses').select('*'),db.from('hunts').select('*').order('created_at',{ascending:false})]);
@@ -45,7 +47,7 @@ export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabas
     must(await db.from('links').update({scan_uuid:uuid}).eq('id',link.id));return {started:true,status:'scanning'};
   }catch(e){must(await db.from('links').update({status:'error',scan_error:e instanceof Error?e.message:'تعذر بدء الفحص'}).eq('id',link.id));throw e;}
 });
-export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{
+async function pollScanCore(data:{link_id:string},context:{supabase:Db}){
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const db=context.supabase;const link=requireData(await db.from('links').select('*').eq('id',data.link_id).single());
   if(link.status!=='scanning')return {status:link.status};
@@ -55,7 +57,10 @@ export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabas
   if(r.status===404){if(reportState(parseReport({}),link.scan_started_at)==='scanning')return {status:'scanning'};return searchEvidenceAnalysis(db,link);}
   try{if(!r.ok)throw new Error('تعذر قراءة تقرير Cloudflare');const raw:unknown=await r.json();logReportOnce(link.id,raw);const report=parseReport(raw);const state=reportState(report,link.scan_started_at);console.info(`Cloudflare task ${report.task?.status ?? 'unspecified'}; report ${state}`);if(state==='scanning')return {status:'scanning'};if(state==='unscannable')return searchEvidenceAnalysis(db,link);return await finalize(db,link,report,cfBase(account),cfGetHeaders(token));}
   catch(e){must(await db.from('links').update({status:'error',scan_error:e instanceof Error?e.message:'تعذر إكمال التحليل'}).eq('id',link.id));throw new Error('تعذر إكمال التحليل؛ لم يُصنّف الرابط على أنه آمن');}
-});
+}
+export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{const result=await pollScanCore(data,context);if(result.status==='done')await maybeRebuildCampaigns(context.supabase);return result;});
+// Archive the latest analysis, return the link and its direct children to the normal queue.
+export const rescanLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>({count:must(await context.supabase.rpc('rescan_link',{_link_id:data.link_id}))}));
 export const screenshotProxy=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const link=requireData(await context.supabase.from('links').select('scan_uuid,status').eq('id',data.link_id).single());if(!link.scan_uuid||!['done','official'].includes(link.status))return null;

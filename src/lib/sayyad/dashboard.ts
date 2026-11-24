@@ -1,9 +1,11 @@
 import type { Tables } from '@/integrations/supabase/types';
 import { uaeTime } from './evidence';
+import { withoutExpert } from './campaigns';
 type W={links:Tables<'links'>[];analyses:Tables<'analyses'>[];hunts:Tables<'hunts'>[];entities:Tables<'entities'>[]};
 export const timelineStart=Date.parse('2026-11-24T04:00:00Z'); // 08:00 GMT+4
 // Pure dashboard counting rules, shared by the screen and its tests.
-export function dashboardStats(d:W,evidenceCount:number,now:Date){
+export function dashboardStats(input:W,evidenceCount:number,now:Date,campaignCount=0){
+  const d=withoutExpert(input);
   const byLink=new Map(d.analyses.map(a=>[a.link_id,a]));
   const flagged=d.links.map(l=>({l,a:byLink.get(l.id)})).filter(x=>x.l.status!=='official'&&x.a&&(x.a.level==='yellow'||x.a.level==='red'));
   const bucket=(l:Tables<'links'>)=>{if(l.status==='official')return 'official';const a=byLink.get(l.id);if(a)return a.level;if(l.status==='error'||l.status==='unscannable')return 'error';return null;};
@@ -17,7 +19,7 @@ export function dashboardStats(d:W,evidenceCount:number,now:Date){
     searches:d.hunts.filter(h=>h.source!=='manual').length,
     checked:d.links.filter(l=>!['pending','scanning'].includes(l.status)).length,
     yellow:flagged.filter(x=>x.a!.level==='yellow').length,red:flagged.filter(x=>x.a!.level==='red').length,
-    entities:new Set(flagged.map(x=>x.a!.impersonated_entity_id).filter(Boolean)).size,evidence:evidenceCount,
+    entities:new Set(flagged.map(x=>x.a!.impersonated_entity_id).filter(Boolean)).size,evidence:evidenceCount,campaigns:campaignCount,
     distribution:[['green','آمن'],['yellow','مشبوه'],['red','خطر'],['official','رسمي'],['error','تعذر']].map(([key,n])=>({key:key!,name:n!,value:counts[key!] ?? 0})),
     topEntities:tally(flagged.map(x=>name(x.a!.impersonated_entity_id)).filter((n):n is string=>!!n)).slice(0,8),
     platforms:tally(flagged.map(x=>x.l.platform)),

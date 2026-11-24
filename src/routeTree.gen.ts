@@ -13,8 +13,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedAnalysisRouteImport } from './routes/_authenticated/analysis'
+import { Route as AuthenticatedCampaignsRouteImport } from './routes/_authenticated/campaigns'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedEvidenceRouteImport } from './routes/_authenticated/evidence'
+import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/expert'
 import { Route as AuthenticatedHuntRouteImport } from './routes/_authenticated/hunt'
 
 const IndexRoute = IndexRouteImport.update({
@@ -36,6 +38,11 @@ const AuthenticatedAnalysisRoute = AuthenticatedAnalysisRouteImport.update({
   path: '/analysis',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCampaignsRoute = AuthenticatedCampaignsRouteImport.update({
+  id: '/campaigns',
+  path: '/campaigns',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -44,6 +51,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
 const AuthenticatedEvidenceRoute = AuthenticatedEvidenceRouteImport.update({
   id: '/evidence',
   path: '/evidence',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedExpertRoute = AuthenticatedExpertRouteImport.update({
+  id: '/expert',
+  path: '/expert',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedHuntRoute = AuthenticatedHuntRouteImport.update({
@@ -56,16 +68,20 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/analysis': typeof AuthenticatedAnalysisRoute
+  '/campaigns': typeof AuthenticatedCampaignsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/evidence': typeof AuthenticatedEvidenceRoute
+  '/expert': typeof AuthenticatedExpertRoute
   '/hunt': typeof AuthenticatedHuntRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/analysis': typeof AuthenticatedAnalysisRoute
+  '/campaigns': typeof AuthenticatedCampaignsRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/evidence': typeof AuthenticatedEvidenceRoute
+  '/expert': typeof AuthenticatedExpertRoute
   '/hunt': typeof AuthenticatedHuntRoute
 }
 export interface FileRoutesById {
@@ -74,23 +90,43 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/analysis': typeof AuthenticatedAnalysisRoute
+  '/_authenticated/campaigns': typeof AuthenticatedCampaignsRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/evidence': typeof AuthenticatedEvidenceRoute
+  '/_authenticated/expert': typeof AuthenticatedExpertRoute
   '/_authenticated/hunt': typeof AuthenticatedHuntRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/analysis' | '/dashboard' | '/evidence' | '/hunt'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/analysis'
+    | '/campaigns'
+    | '/dashboard'
+    | '/evidence'
+    | '/expert'
+    | '/hunt'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/analysis' | '/dashboard' | '/evidence' | '/hunt'
+  to:
+    | '/'
+    | '/auth'
+    | '/analysis'
+    | '/campaigns'
+    | '/dashboard'
+    | '/evidence'
+    | '/expert'
+    | '/hunt'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/analysis'
+    | '/_authenticated/campaigns'
     | '/_authenticated/dashboard'
     | '/_authenticated/evidence'
+    | '/_authenticated/expert'
     | '/_authenticated/hunt'
   fileRoutesById: FileRoutesById
 }
@@ -130,6 +166,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAnalysisRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/campaigns': {
+      id: '/_authenticated/campaigns'
+      path: '/campaigns'
+      fullPath: '/campaigns'
+      preLoaderRoute: typeof AuthenticatedCampaignsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -144,6 +187,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEvidenceRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/expert': {
+      id: '/_authenticated/expert'
+      path: '/expert'
+      fullPath: '/expert'
+      preLoaderRoute: typeof AuthenticatedExpertRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/hunt': {
       id: '/_authenticated/hunt'
       path: '/hunt'
@@ -156,15 +206,19 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAnalysisRoute: typeof AuthenticatedAnalysisRoute
+  AuthenticatedCampaignsRoute: typeof AuthenticatedCampaignsRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedEvidenceRoute: typeof AuthenticatedEvidenceRoute
+  AuthenticatedExpertRoute: typeof AuthenticatedExpertRoute
   AuthenticatedHuntRoute: typeof AuthenticatedHuntRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAnalysisRoute: AuthenticatedAnalysisRoute,
+  AuthenticatedCampaignsRoute: AuthenticatedCampaignsRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedEvidenceRoute: AuthenticatedEvidenceRoute,
+  AuthenticatedExpertRoute: AuthenticatedExpertRoute,
   AuthenticatedHuntRoute: AuthenticatedHuntRoute,
 }
 

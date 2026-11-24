@@ -86,6 +86,112 @@ export type Database = {
           },
         ]
       }
+      analysis_history: {
+        Row: {
+          analysis: Json
+          archived_at: string
+          id: string
+          link_id: string
+        }
+        Insert: {
+          analysis: Json
+          archived_at?: string
+          id?: string
+          link_id: string
+        }
+        Update: {
+          analysis?: Json
+          archived_at?: string
+          id?: string
+          link_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analysis_history_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_links: {
+        Row: {
+          campaign_id: string
+          link_id: string
+          reasons_ar: string[]
+        }
+        Insert: {
+          campaign_id: string
+          link_id: string
+          reasons_ar?: string[]
+        }
+        Update: {
+          campaign_id?: string
+          link_id?: string
+          reasons_ar?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_links_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_links_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaigns: {
+        Row: {
+          created_at: string
+          entity_id: string | null
+          first_seen_at: string | null
+          id: string
+          last_seen_at: string | null
+          link_count: number
+          name_ar: string
+          signals: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          entity_id?: string | null
+          first_seen_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          link_count?: number
+          name_ar: string
+          signals?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string | null
+          first_seen_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          link_count?: number
+          name_ar?: string
+          signals?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       custody_log: {
         Row: {
           action: string
@@ -229,6 +335,59 @@ export type Database = {
             foreignKeyName: "evidence_link_id_fkey"
             columns: ["link_id"]
             isOneToOne: true
+            referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expert_links: {
+        Row: {
+          batch: string
+          created_at: string
+          created_by: string
+          domain: string
+          excluded_reason: string | null
+          id: string
+          impersonated_entity: string | null
+          link_id: string | null
+          note: string | null
+          platform: string
+          url: string
+          url_raw: string
+        }
+        Insert: {
+          batch?: string
+          created_at?: string
+          created_by?: string
+          domain?: string
+          excluded_reason?: string | null
+          id?: string
+          impersonated_entity?: string | null
+          link_id?: string | null
+          note?: string | null
+          platform?: string
+          url: string
+          url_raw: string
+        }
+        Update: {
+          batch?: string
+          created_at?: string
+          created_by?: string
+          domain?: string
+          excluded_reason?: string | null
+          id?: string
+          impersonated_entity?: string | null
+          link_id?: string | null
+          note?: string | null
+          platform?: string
+          url?: string
+          url_raw?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expert_links_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
             referencedRelation: "links"
             referencedColumns: ["id"]
           },
@@ -399,6 +558,8 @@ export type Database = {
     Functions: {
       claim_analysis: { Args: { _link_id: string }; Returns: boolean }
       claim_scan: { Args: { _link_id: string }; Returns: boolean }
+      replace_campaigns: { Args: { _campaigns: Json }; Returns: number }
+      rescan_link: { Args: { _link_id: string }; Returns: number }
     }
     Enums: {
       [_ in never]: never

@@ -43,6 +43,13 @@
       "when": 1795510337153,
       "tag": "0005_evidence_files_and_custody",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795515542846,
+      "tag": "0006_0006_campaigns_expert_rescan",
+      "breakpoints": true
     }
   ]
 }

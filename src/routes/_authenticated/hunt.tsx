@@ -7,9 +7,10 @@ import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/com
 import { useEngine } from '@/components/sayyad/engine-context';
 import { RiskBadge, RadarVisual, meta } from '@/components/sayyad/common';
 import type { Tables } from '@/integrations/supabase/types';
+import { withoutExpert } from '@/lib/sayyad/campaigns';
 export const Route=createFileRoute('/_authenticated/hunt')({head:()=>meta('الصيّاد','غرفة عمليات رصد الروابط المشبوهة وانتحال خدمات الجهات الإماراتية.'),component:Hunt});
 function Hunt(){const engine=useEngine(),navigate=useNavigate();const[phrase,setPhrase]=useState(''),[url,setUrl]=useState(''),[level,setLevel]=useState('all'),[platform,setPlatform]=useState('all'),[entity,setEntity]=useState('all');
-  const data=engine.data;
+  const data=useMemo(()=>engine.data?withoutExpert(engine.data):undefined,[engine.data]);
   const analysisByLink=useMemo(()=>new Map(data?.analyses.map(a=>[a.link_id,a])),[data]);
   const matches=(l:Tables<'links'>)=>{const a=analysisByLink.get(l.id);return(level==='all'||l.status===level||a?.level===level)&&(platform==='all'||l.platform===platform)&&(entity==='all'||a?.impersonated_entity_id===entity);};
   const links=(data?.links ?? []).filter(l=>l.status!=='official'&&matches(l)).sort((a,b)=>{const rank=(l:Tables<'links'>)=>{const risk=analysisByLink.get(l.id)?.level;return risk==='red'?0:risk==='yellow'?1:l.status==='unscannable'||l.status==='error'?2:!risk?3:4;};return rank(a)-rank(b);});
