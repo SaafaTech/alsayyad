@@ -78,6 +78,13 @@
       "when": 1795526772722,
       "tag": "0010_english_search_phrases",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795527598171,
+      "tag": "0011_investigator_access_lockdown",
+      "breakpoints": true
     }
   ]
 }

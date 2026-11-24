@@ -10,11 +10,12 @@ export async function rebuildCampaignsNow(){
   return drafts.length;
 }
 /** Debounced: skips when a rebuild started less than 30 seconds ago. Never throws. */
-export async function maybeRebuildCampaigns(db:Db){
+export async function maybeRebuildCampaigns(_db?:Db){
   try{
-    const now=Date.now();const {data}=await db.from('engine_cache').select('expires_at').eq('key','campaigns-rebuilt').maybeSingle();
+    const { supabaseAdmin:cache } = await import('@/integrations/supabase/client.server');
+    const now=Date.now();const {data}=await cache.from('engine_cache').select('expires_at').eq('key','campaigns-rebuilt').maybeSingle();
     if(data&&Date.parse(data.expires_at)>now)return;
-    await db.from('engine_cache').upsert({key:'campaigns-rebuilt',value:{at:new Date(now).toISOString()},expires_at:new Date(now+30000).toISOString()},{onConflict:'key'});
+    await cache.from('engine_cache').upsert({key:'campaigns-rebuilt',value:{at:new Date(now).toISOString()},expires_at:new Date(now+30000).toISOString()},{onConflict:'key'});
     await rebuildCampaignsNow();
   }catch(e){console.warn('Campaign rebuild skipped:',e instanceof Error?e.message:'unknown');}
 }

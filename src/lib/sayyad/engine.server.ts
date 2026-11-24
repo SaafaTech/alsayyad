@@ -76,9 +76,10 @@ export async function domainAge(db:Db,domain:string,platform:string,cacheSecret:
     let bases:string[]=[];let origins:string[]=[];
     if(tld==='com'||tld==='net')bases=[`https://rdap.verisign.com/${tld}/v1/`];
     else {
-      const cached=must(await db.from('engine_cache').select('*').eq('key','iana-rdap').gt('expires_at',new Date().toISOString()).maybeSingle());
+      const { supabaseAdmin:cache } = await import('@/integrations/supabase/client.server');
+      const cached=must(await cache.from('engine_cache').select('*').eq('key','iana-rdap').gt('expires_at',new Date().toISOString()).maybeSingle());
       let json=await verifiedBootstrap(cached?.value,cacheSecret);
-      if(!json){const r=await providerFetch('https://data.iana.org/rdap/dns.json');if(!r.ok)throw new Error();json=bootstrapSchema.parse(await r.json());const valid=await signedBootstrap(json,cacheSecret);must(await db.from('engine_cache').upsert({key:'iana-rdap',value:valid,expires_at:new Date(Date.now()+86400000).toISOString()}));}
+      if(!json){const r=await providerFetch('https://data.iana.org/rdap/dns.json');if(!r.ok)throw new Error();json=bootstrapSchema.parse(await r.json());const valid=await signedBootstrap(json,cacheSecret);must(await cache.from('engine_cache').upsert({key:'iana-rdap',value:valid,expires_at:new Date(Date.now()+86400000).toISOString()}));}
       const bootstrap=bootstrapSchema.parse(json);bases=bootstrap.services.find(([tlds])=>tlds.includes(tld))?.[1].filter(b=>b.startsWith('https://')) ?? [];origins=bases.map(b=>new URL(b).origin);
     }
     for(const base of bases){const r=await providerFetch(`${base.replace(/\/?$/,'/')}domain/${encodeURIComponent(domain)}`,{},origins);if(!r.ok)continue;const body:unknown=await r.json();const whois=parseWhois(body);const date=rdapSchema.parse(body).events?.find(e=>e.eventAction==='registration')?.eventDate;if(date && age(date)!==null)return {domain_age_days:age(date),age_source:'rdap' as const,whois};}

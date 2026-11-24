@@ -32,13 +32,13 @@ export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabas
     if(r.status===429) {
       must(await db.from('links').update({status:'pending',scan_started_at:null,scan_error:null}).eq('id',link.id));
       // Persist the diagnostic claim so separate server invocations log at most once per link.
-      const logged=requireData(await db.from('engine_cache').upsert({key:`scan-429:${link.id}`,value:{http_status:429},expires_at:new Date(Date.now()+86400000).toISOString()},{onConflict:'key',ignoreDuplicates:true}).select('key'));
+      const logged=requireData(await (await import('@/integrations/supabase/client.server')).supabaseAdmin.from('engine_cache').upsert({key:`scan-429:${link.id}`,value:{http_status:429},expires_at:new Date(Date.now()+86400000).toISOString()},{onConflict:'key',ignoreDuplicates:true}).select('key'));
       if(logged.length)console.warn('Cloudflare scan HTTP 429');
       return {started:false,status:'waiting'};
     }
     if(!r.ok) {
       const message=scanRefusalMessage(await r.text(),token);
-      const logged=requireData(await db.from('engine_cache').upsert({key:`scan-refusal:${link.id}`,value:{http_status:r.status},expires_at:new Date(Date.now()+86400000).toISOString()},{onConflict:'key',ignoreDuplicates:true}).select('key'));
+      const logged=requireData(await (await import('@/integrations/supabase/client.server')).supabaseAdmin.from('engine_cache').upsert({key:`scan-refusal:${link.id}`,value:{http_status:r.status},expires_at:new Date(Date.now()+86400000).toISOString()},{onConflict:'key',ignoreDuplicates:true}).select('key'));
       if(logged.length)console.warn(`Cloudflare scan HTTP ${r.status}: ${message}`);
       must(await db.from('links').update({scan_error:scanRefusalReason}).eq('id',link.id));
       const result=await searchEvidenceAnalysis(db,{...link,status:'scanning',scan_error:scanRefusalReason});
