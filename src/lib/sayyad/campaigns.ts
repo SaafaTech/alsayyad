@@ -81,3 +81,9 @@ export function awarenessMessage(entity:Entity|null|undefined,domains:string[]){
   parts.push('للإبلاغ: خدمة أمان من شرطة أبوظبي على 8002626 أو رسالة نصية إلى 2828.');
   return parts.join(' ');
 }
+/** Private-audit networks: cluster ONLY links from expert_sample hunts, in memory (never written). */
+export function expertNetworks(input:{hunts:Pick<Tables<'hunts'>,'id'|'source'>[];links:Link[];analyses:Analysis[];entities:Entity[]}){
+  const ids=new Set(input.hunts.filter(h=>h.source==='expert_sample').map(h=>h.id));
+  const links=input.links.filter(l=>!!l.hunt_id&&ids.has(l.hunt_id));const keep=new Set(links.map(l=>l.id));
+  return clusterCampaigns({links,analyses:input.analyses.filter(a=>keep.has(a.link_id)),entities:input.entities});
+}

@@ -39,6 +39,10 @@ export function EngineProvider({children}:{children:ReactNode}) {
   useEffect(()=>()=>{cancel.current=true;},[]);
   const wait=async(ms:number,finishCurrent=false)=>{const until=Date.now()+ms;while(Date.now()<until){if(cancel.current&&!finishCurrent)return false;await new Promise(r=>setTimeout(r,Math.min(200,until-Date.now())));}return true;};
   const refresh=async()=>{const r=await query.refetch();if(r.error)throw r.error;return r.data;};
+  // One shared, throttled workspace refetch for all workers (max once per 3s, in-flight promise reused).
+  const shared=useRef<{p:Promise<Workspace|undefined>|null;at:number}>({p:null,at:0});
+  const throttled=()=>{const st=shared.current;if(st.p)return st.p;const delay=Math.max(0,st.at+3000-Date.now());st.p=(async()=>{if(delay)await new Promise(r=>setTimeout(r,delay));try{return await refresh();}finally{st.at=Date.now();st.p=null;}})();return st.p;};
+  const PAUSE='sayyad-paused';const unpause=()=>{try{sessionStorage.removeItem(PAUSE);}catch{/* ignore */}};const paused=()=>{try{return !!sessionStorage.getItem(PAUSE);}catch{return false;}};
   async function drain(onlyId?:string) {
     const taken=new Set<string>(),submitted=new Set<string>(),targets=new Set<string>(),completed=new Set<string>();
     const initial=await refresh();
@@ -57,7 +61,7 @@ export function EngineProvider({children}:{children:ReactNode}) {
     const errors:unknown[]=[];
     async function worker() {
       while(!cancel.current) {
-        const data=await refresh();track(data);
+        const data=await throttled();track(data);
         // Reservation is synchronous after the refresh: no two workers can take one ID.
         // Workers stay alive while others run, so linked pages queued by a finishing scan start automatically.
         const link=pickNext(data?.links ?? [],taken,onlyId);
@@ -70,7 +74,7 @@ export function EngineProvider({children}:{children:ReactNode}) {
           if(link.status==='pending') {
             const result=await scan({data:{link_id:link.id}});
             if(result.status==='waiting'){waiting=true;continue;}
-            if(!result.started&&result.status!=='scanning'){track(await refresh());continue;}
+            if(!result.started&&result.status!=='scanning'){track(await throttled());continue;}
           }
           submitted.add(link.id);track(data);
           // Stop blocks new submissions, but lets every already-submitted scan finish.
@@ -78,12 +82,12 @@ export function EngineProvider({children}:{children:ReactNode}) {
           while(Date.now()<until) {
             await wait(3000,true);
             const result=await poll({data:{link_id:link.id}});
-            track(await refresh());
+            track(await throttled());
             if(result.status!=='scanning')break;
           }
         } catch(error) {
           errors.push(error);
-          track(await refresh());
+          track(await throttled());
         } finally {
           submitted.delete(link.id);taken.delete(link.id);
           scanProgress();
@@ -101,20 +105,20 @@ export function EngineProvider({children}:{children:ReactNode}) {
     catch(e){const msg=e instanceof Error?e.message:'تعذر إكمال العملية';setProgress('توقفت العملية؛ تحقق من الإعدادات',{finished:true});toast.error(msg);}
     finally{active.current=false;setRunning(false);clearJob.current=setTimeout(()=>{setJob(null);setRunIds([]);},10000);await query.refetch();}}
   const hasQueue=(d:Workspace|undefined)=>!!d?.links.some(l=>l.status==='pending'||l.status==='scanning');
-  const autoResume=()=>{if(!active.current&&hasQueue(query.data))void run(()=>drain());};
+  const autoResume=()=>{if(!active.current&&!paused()&&hasQueue(query.data))void run(()=>drain());};
   // Pending links left from an earlier session start draining automatically once data loads.
   const autoStarted=useRef(false);
   useEffect(()=>{if(autoStarted.current||!query.data)return;autoStarted.current=true;autoResume();},[query.data]);
   const found=(before:Workspace|undefined,after:Workspace|undefined)=>Math.max(0,(after?.links.length ?? 0)-(before?.links.length ?? 0));
   const value:Engine={lastSearch,dismissLast:()=>setLast(null),data:query.data,loading:query.isPending,error:query.error?'تعذر تحميل بيانات التحقيق':null,running,progress,job,recent,runIds,autoResume,
-    runSearch:async(phrase,source)=>{if(!phrase.trim())return;await run(async()=>{setProgress(source==='google'?'يبحث في Google…':'يبحث في الخرائط…');setLast(null);const before=query.data;const r=await (source==='google'?google:maps)({data:{phrase}});setLast({huntIds:[r.hunt_id],phrase,source,noSite:'no_site' in r?Number(r.no_site):0});const after=await refresh();setProgress(`وجد ${found(before,after)} روابط جديدة`);await new Promise(r=>setTimeout(r,800));await drain();});},
-    startHunt:async()=>{await run(async()=>{const data=await refresh();const phrases=(data?.phrases ?? []).filter(p=>p.active);for(const [i,p] of phrases.entries()){if(cancel.current)break;setProgress(`يبحث في Google… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await google({data:{phrase:p.phrase}});await refresh();if(cancel.current)break;setProgress(`يبحث في الخرائط… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await maps({data:{phrase:p.phrase}});await refresh();}if(!cancel.current)await drain();});},
-    runCtWatch:async()=>{await run(async()=>{const data=await refresh();const kws=ctKeywords(data?.entities ?? []);let total=0;const failed:string[]=[];const ids:string[]=[];setLast(null);
+    runSearch:async(phrase,source)=>{if(!phrase.trim())return;unpause();await run(async()=>{setProgress(source==='google'?'يبحث في Google…':'يبحث في الخرائط…');setLast(null);const before=query.data;const r=await (source==='google'?google:maps)({data:{phrase}});setLast({huntIds:[r.hunt_id],phrase,source,noSite:'no_site' in r?Number(r.no_site):0});const after=await refresh();setProgress(`وجد ${found(before,after)} روابط جديدة`);await new Promise(r=>setTimeout(r,800));await drain();});},
+    startHunt:async()=>{unpause();await run(async()=>{const data=await refresh();const phrases=(data?.phrases ?? []).filter(p=>p.active);for(const [i,p] of phrases.entries()){if(cancel.current)break;setProgress(`يبحث في Google… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await google({data:{phrase:p.phrase}});await refresh();if(cancel.current)break;setProgress(`يبحث في الخرائط… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await maps({data:{phrase:p.phrase}});await refresh();}if(!cancel.current)await drain();});},
+    runCtWatch:async()=>{unpause();await run(async()=>{const data=await refresh();const kws=ctKeywords(data?.entities ?? []);let total=0;const failed:string[]=[];const ids:string[]=[];setLast(null);
       for(const [i,k] of kws.entries()){if(cancel.current)break;setProgress(`يبحث في سجلات الشهادات عن ${k}… (${i+1} من ${kws.length}) وجد ${total} نطاق جديد`,{done:i,total:kws.length});try{const r=await ct({data:{keyword:k}});total+=r.found;ids.push(r.hunt_id);setLast({huntIds:[...ids],phrase:'سجلات الشهادات',source:'ct',noSite:0});}catch{failed.push(k);}}
       if(failed.length)toast.warning(`تعذر الوصول لسجلات الشهادات لـ: ${failed.join('، ')}`);
       setProgress(`وجد ${total} نطاق جديد في سجلات الشهادات`);await refresh();await new Promise(r=>setTimeout(r,800));if(!cancel.current)await drain();});},
-    checkLink:async(url)=>{if(active.current)return null;try{const link=await manual({data:{url}});if(link.hunt_id)setLast({huntIds:[link.hunt_id],phrase:link.domain,source:'manual',noSite:0});await refresh();return link.id;}catch(e){toast.error(e instanceof Error?e.message:'رابط غير صالح');return null;}},
-    stop:()=>{cancel.current=true;setProgress('إيقاف… ننتظر اكتمال الفحص الحالي');},resume:async()=>run(()=>drain()),
+    checkLink:async(url)=>{if(active.current)return null;unpause();try{const link=await manual({data:{url}});if(link.hunt_id)setLast({huntIds:[link.hunt_id],phrase:link.domain,source:'manual',noSite:0});await refresh();return link.id;}catch(e){toast.error(e instanceof Error?e.message:'رابط غير صالح');return null;}},
+    stop:()=>{cancel.current=true;try{sessionStorage.setItem(PAUSE,'1');}catch{/* ignore */}setProgress('إيقاف… ننتظر اكتمال الفحص الحالي');},resume:async()=>{unpause();await run(()=>drain());},
   };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

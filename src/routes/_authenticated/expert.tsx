@@ -13,7 +13,8 @@ import { meta, ProgressCard } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { supabase } from '@/integrations/supabase/client';
 import { parsePasted,resultsCsv,importCsv,patternStats,accuracy,sample,expertLevel,expectedMatrix } from '@/lib/sayyad/expert';
-import { defangUrl,defangDomain } from '@/lib/sayyad/campaigns';
+import { defangUrl,defangDomain,expertNetworks } from '@/lib/sayyad/campaigns';
+import { Link } from '@tanstack/react-router';
 import { scanExpertSample } from '@/lib/sayyad/expert.functions';
 import { rescanLink } from '@/lib/sayyad/engine.functions';
 import { phraseKey } from '@/lib/sayyad/phrases';
@@ -75,6 +76,7 @@ function Expert(){
       {paste.results}
     </Card>
     <Card n={tr("٣")} icon={<Fingerprint size={16}/>} title={tr("خيوط للتحقيق")}>
+      <Networks/>
       <p className="x-hint mb-4">{tr("الإجمالي")} {stats.total} • {tr("مستبعد")} {stats.excluded} • {tr("قابل للفحص")} {stats.scannable}</p>
       <div className="x-tiles x-tiles-3">
         <Tile tone="amber" icon={<Megaphone size={16}/>} label={tr("إعلانات قوقل مدفوعة")} value={`${stats.adPct}%`}/>
@@ -137,4 +139,22 @@ function usePasteBatch(rows:Row[],level:(id:string)=>string|null){
       <div className="overflow-x-auto mt-3"><table className="w-full text-xs"><thead><tr className="text-muted-foreground"><th className="text-start p-1">{tr("الرابط")}</th><th className="text-start p-1">{tr("الحكم")}</th><th className="text-start p-1">{tr("السبب الرئيسي")}</th><th className="text-start p-1">{tr("الوجهة النهائية")}</th></tr></thead>
       <tbody>{result.map(r=><tr key={r.id} className="border-t border-border"><td dir="ltr" className="p-1 text-start break-all mono">{defangUrl(r.url)}</td><td className="p-1 whitespace-nowrap">{r.level==='red'||r.level==='yellow'||r.level==='green'?<RiskBadge level={r.level} score={r.score ?? 0} signals={r.signals}/>:word(r.level,r.score,r.signals)}</td><td className="p-1">{r.top_reason ?? '—'}</td><td dir="ltr" className="p-1 text-start break-all mono">{r.final_url&&r.final_url!==r.url?defangUrl(r.final_url):'—'}</td></tr>)}</tbody></table></div></div>:null;
   return {input,results,exportCsv,hasResult:result.length>0};
+}
+
+function Networks(){
+  const engine=useEngine();const d=engine.data;
+  const nets=useMemo(()=>d?expertNetworks({hunts:d.hunts,links:d.links,analyses:d.analyses,entities:d.entities}):[],[d]);
+  return <section className="mb-5">
+    <h4 className="font-semibold">{tr("شبكات مرتبطة في بياناتك")}</h4>
+    <p className="x-hint mb-2">{tr("من بيانات المختص — ليست من صيد الصيّاد")}</p>
+    {!nets.length?<p className="text-sm text-muted-foreground">{tr("لا توجد شبكات مرتبطة بعد")}</p>:
+    <div className="grid gap-3">{nets.map((n,i)=>{const ent=d?.entities.find(e=>e.id===n.entity_id);
+      const ips=[...new Set(n.links.map(m=>((d?.analyses.find(a=>a.link_id===m.link_id)?.hosting ?? {}) as {ip?:string|null}).ip).filter((x):x is string=>!!x))];
+      return <div key={i} className="rounded-lg border p-3">
+        <div className="flex flex-wrap items-center gap-2 mb-2"><b>{ent?ent.name_ar:tr("حملة غير مصنفة")}</b><span className="text-xs text-muted-foreground">{tf("{0} مواقع",n.link_count)}</span>
+          {n.signals.reasons_ar.map(r=><span key={r} className="rounded-full border px-2 py-0.5 text-xs">{tr(r)}</span>)}
+          {ips.length===1&&<span className="text-xs text-muted-foreground">IP: <span dir="ltr" className="font-mono">{ips[0]}</span></span>}</div>
+        <ul className="grid gap-1">{n.links.map(m=>{const l=d?.links.find(x=>x.id===m.link_id);return l&&<li key={m.link_id}><Link to="/analysis" search={{id:m.link_id}} dir="ltr" className="font-mono text-sm text-primary hover:underline">{defangDomain(l.domain)}</Link></li>;})}</ul>
+      </div>;})}</div>}
+  </section>;
 }

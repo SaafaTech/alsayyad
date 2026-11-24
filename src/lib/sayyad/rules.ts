@@ -77,6 +77,7 @@ export function publicIpv4(h:string){const [a=0,b=0]=h.split('.').map(Number);re
 export const hostname = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.$/,'');
 export const within = (domain: string, official: string) => domain===official || domain.endsWith(`.${official}`);
 const neutral=['wikipedia.org','youtube.com','gulfnews.com','khaleejtimes.com','thenationalnews.com','emaratalyoum.com','alkhaleej.ae','wam.ae','u.ae','gov.ae'];
+export const knownLegit=['bankfab.com','adcb.com','emiratesnbd.com','emiratesislamic.ae','adib.ae','dib.ae','mashreq.com','rakbank.ae','cbd.ae','nbf.ae','alhilalbank.ae','ajmanbank.ae','sib.ae','uab.ae','cbi.ae','wio.io','liv.me','payit.ae','du.ae','virginmobile.ae','noon.com','amazon.ae','carrefouruae.com','luluhypermarket.com','talabat.com','careem.com','dubizzle.com','propertyfinder.ae','bayut.com','emirates.com','etihad.com','flydubai.com','airarabia.com','adnoc.ae','enoc.com','taqa.com','aldar.com','emaar.com','adq.ae','mubadala.com','agthia.com'];
 const publicServices=['dubai.ae','rak.ae','sharjah.ae','shj.ae','ajman.ae','sedd.ae','ajmanded.ae','parkin.ae','evg.ae'];
 /** The single official test used on arrival, before scanning, after redirects, in chains and destinations. */
 export function officialDestination(domain: string, entities: Entity[]) {
@@ -84,6 +85,7 @@ export function officialDestination(domain: string, entities: Entity[]) {
   const entity=entities.find(e=>e.official_domains.some(o=>within(d,o)));
   if(entity) return {entity, reason:'نطاق رسمي مسجل'};
   if(neutral.some(n=>within(d,n))) return {entity:null, reason:'موقع معروف'};
+  if(knownLegit.some(n=>within(d,n))) return {entity:null, reason:'موقع معروف سليم'};
   if(publicServices.some(n=>within(d,n))) return {entity:null, reason:'موقع حكومي أو خدمة عامة معروفة'};
   if(d.endsWith('.gov.ae')||d.endsWith('.abudhabi')||d==='apps.apple.com'||d==='play.google.com') return {entity:null, reason:'وجهة رسمية معروفة'};
   return null;
