@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useMemo,useState } from 'react';
 import { useQuery,useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { FlaskConical,Upload,ScanLine,LockKeyhole } from 'lucide-react';
+import { FlaskConical,Upload,ScanLine,Lock,ListFilter,Info,ArrowDownUp,Flame,Eye,Trash2,ShieldCheck,Clock,Fingerprint,Megaphone,Cloud,Tag,Plus,Target,Download,ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,19 +16,30 @@ import { parsePasted,resultsCsv,importCsv,patternStats,accuracy,sample,expertLev
 import { defangUrl,defangDomain } from '@/lib/sayyad/campaigns';
 import { scanExpertSample } from '@/lib/sayyad/expert.functions';
 import { rescanLink } from '@/lib/sayyad/engine.functions';
-export const Route=createFileRoute('/_authenticated/expert')({head:()=>meta(tr("قياس الدقة"),tr("مجموعة تحقق خاصة لقياس دقة الرصد من قائمة روابط المختص.")),component:Expert});
+import { addPhrase } from '@/lib/sayyad/phrases.functions';
+import { phraseKey } from '@/lib/sayyad/phrases';
+import { platformLabel } from '@/lib/sayyad/rules';
+import { BarList } from '@/components/sayyad/bar-list';
+export const Route=createFileRoute('/_authenticated/expert')({head:()=>meta(tr("تدقيق خاص"),tr("فرز البلاغات وتحليل الأنماط وقياس دقة الرصد — خاص بحسابك.")),component:Expert});
 const pct=(x:number)=>`${Math.round(x*100)}%`;
-function List({title,items}:{title:string;items:{name:string;value:number}[]}){return <div><h3 className="text-sm text-primary mb-2">{title}</h3>{items.length?<ul className="text-xs space-y-1">{items.map(i=><li key={i.name} className="flex justify-between gap-2"><span dir="ltr">{i.name}</span><b>{i.value}</b></li>)}</ul>:<p className="text-xs text-muted-foreground">—</p>}</div>;}
+function Card({n,icon,title,action,children}:{n:string;icon:React.ReactNode;title:string;action?:React.ReactNode;children:React.ReactNode}){
+  return <section className="analysis-section x-card"><div className="x-head"><h2><span className="x-ic">{icon}</span>{n}. {title}</h2>{action}</div>{children}</section>;
+}
+function Tile({tone,icon,label,value,sub}:{tone:'red'|'amber'|'grey'|'green';icon:React.ReactNode;label:string;value:React.ReactNode;sub?:string}){
+  return <div className={`x-tile t-${tone}`}><span className="x-badge">{icon}</span><span className="x-label">{label}</span><strong>{value}</strong>{sub&&<small>{sub}</small>}</div>;
+}
 function Expert(){
-  const engine=useEngine(),qc=useQueryClient(),queue=useServerFn(scanExpertSample),rescan=useServerFn(rescanLink);
+  const engine=useEngine(),qc=useQueryClient(),queue=useServerFn(scanExpertSample),rescan=useServerFn(rescanLink),add=useServerFn(addPhrase);
   const rows=useQuery({queryKey:['expert-links'],queryFn:async()=>{const r=await supabase.from('expert_links').select('*').order('created_at');if(r.error)throw r.error;return r.data;}});
-  const [n,setN]=useState(100),[busy,setBusy]=useState(false);
+  const [n,setN]=useState(100),[busy,setBusy]=useState(false),[openGroup,setOpenGroup]=useState<string|null>(null),[added,setAdded]=useState<Set<string>>(new Set());
   const data=rows.data ?? [];
   const stats=useMemo(()=>patternStats(data,(engine.data?.entities ?? []).flatMap(e=>e.brand_keywords)),[data,engine.data?.entities]);
   const pending=data.filter(r=>!r.excluded_reason&&!r.link_id);
   const level=(id:string)=>expertLevel(engine.data?.analyses.find(x=>x.link_id===id),engine.data?.links.find(x=>x.id===id)?.status);
   const scannedRows=data.filter(r=>r.link_id);
   const acc=accuracy(data,level),mx=expectedMatrix(data,level),opct=(x:number|null)=>x===null?'—':pct(x);
+  const paste=usePasteBatch(data,level);
+  const phraseKeys=new Set((engine.data?.phrases ?? []).map(p=>phraseKey(p.phrase)));
   async function upload(file:File){
     try{const parsed=importCsv(await file.text());const {data:u}=await supabase.auth.getUser();if(!u.user)return;
       const batch=`${file.name} ${new Date().toISOString()}`;
@@ -38,34 +49,60 @@ function Expert(){
   }
   async function scan(){setBusy(true);try{const pick=sample(pending,Math.min(n,pending.length));const r=await queue({data:{ids:pick.map(p=>p.id)}});toast.success(tf("أضيف {0} رابط لقائمة الفحص",r.queued));await qc.invalidateQueries({queryKey:['expert-links']});void engine.resume();}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر بدء الفحص"));}finally{setBusy(false);}}
   async function rescanAll(){setBusy(true);try{let n=0;for(const r of scannedRows){try{n+=(await rescan({data:{link_id:r.link_id!}})).count ?? 0;}catch{/* scanning or official: skipped */}}toast.success(tf("أعيد {0} رابط لقائمة الفحص",n));void engine.resume();}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر إعادة الفحص"));}finally{setBusy(false);}}
-  return <div><div className="page-heading"><div><div className="eyebrow"><LockKeyhole size={14}/> {tr("خاص")}</div><h1>{tr("قياس الدقة")}</h1><p>{tr("القائمة خاصة بحسابك فقط، ولا تظهر في لوحة التحكم أو الحملات.")}</p></div>
-    <label className="inline-flex"><input type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f);e.target.value='';}}/><Button asChild><span><Upload/>{tr("رفع CSV")}</span></Button></label></div>
-    <p className="text-xs text-muted-foreground mb-4">{tr("الأعمدة: url، impersonated_entity (اختياري)، note (اختياري)، expected (اختياري: fraud/legit أو احتيال/سليم/رسمي).")}</p>
-    <PasteBatch rows={data} level={level}/>
+  async function addWord(w:string){try{await add({data:{phrase:w,entity_id:null}});setAdded(s=>new Set(s).add(phraseKey(w)));toast.success(tr("أُضيفت كعبارة صيد"));void qc.invalidateQueries({queryKey:['workspace']});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر الحفظ"));}}
+  const dead=acc.removed+acc.failed,deadPct=acc.scanned?Math.round(dead*100/acc.scanned):0;
+  const noExpected=mx.caught+mx.missed+mx.legitOk+mx.falseAlarm===0;
+  const fileInput=<label className="inline-flex"><input type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)void upload(f);e.target.value='';}}/><Button asChild variant="outline"><span><Upload/>{tr("رفع CSV")}</span></Button></label>;
+  return <div className="expert-page"><div className="page-heading"><div><div className="eyebrow"><Lock size={14}/> {tr("خاص بحسابك")}</div><h1>{tr("تدقيق خاص")}</h1><p>{tr("فرز البلاغات • تحليل الأنماط • قياس الدقة")}</p></div></div>
+    <Card n={tr("١")} icon={<ListFilter size={16}/>} title={tr("الصق روابط البلاغات")}>
+      {paste.input(fileInput)}
+      <p className="x-hint">{tr("رابط في كل سطر، ويمكن إضافة ,fraud أو ,legit بعده")}<span className="x-info" tabIndex={0} title={tr("الأعمدة: url، impersonated_entity (اختياري)، note (اختياري)، expected (اختياري: fraud/legit أو احتيال/سليم/رسمي).")+' — '+tr("يُقبل الشكل المعطّل مثل hxxps://site[.]com. الحد 500 رابط.")} aria-label={tr("تفاصيل الأعمدة")}><Info size={14}/></span></p>
+      <details className="x-adv"><summary><ChevronDown size={14}/>{tr("خيارات متقدمة")}</summary><div className="flex flex-wrap items-center gap-3 mt-3"><Input type="number" min={1} max={pending.length||1} value={n} onChange={e=>setN(Math.max(1,Math.min(Number(e.target.value)||1,pending.length||1)))} className="w-32"/><Button variant="outline" disabled={busy||engine.running||!pending.length} onClick={()=>void scan()}><ScanLine/>{tr("فحص عينة")}</Button><Button variant="outline" disabled={busy||engine.running||!scannedRows.length} onClick={()=>void rescanAll()}><ScanLine/>{tr("إعادة فحص المفحوصة")}</Button><span className="text-xs text-muted-foreground">{pending.length} {tr("رابط لم يُفحص بعد")}</span></div><div className="mt-3"><ProgressCard job={busy&&!engine.running?{stage:tr("يجهز الروابط لقائمة الفحص…")}:engine.job} running={busy||engine.running} onStop={engine.stop}/></div></details>
+    </Card>
     {rows.isPending?<div className="empty-state">{tr("جارٍ التحميل…")}</div>:!data.length?<div className="empty-state"><FlaskConical size={32}/>{tr("لم تُرفع روابط بعد")}</div>:<>
-    <section className="analysis-section"><h2>{tr("تحليل الأنماط")}</h2>
-      <div className="dash-counters">{[[tr("الإجمالي"),stats.total],[tr("مستبعد"),stats.excluded],[tr("قابل للفحص"),stats.scannable],[tr("منصات مجانية"),`${stats.freePct}%`],[tr("يحتوي كلمة علامة"),`${stats.brandPct}%`],[tr("معلمات إعلان"),`${stats.adPct}%`]].map(([l,v])=><div key={String(l)} className="counter dash-counter"><span>{l}</span><strong>{v}</strong></div>)}</div>
-      <div className="grid gap-6 md:grid-cols-3"><List title={tr("حسب المنصة")} items={stats.byPlatform}/><List title={tr("حسب النطاق العلوي")} items={stats.byTld}/><List title={tr("أكثر الكلمات تكراراً")} items={stats.topTokens}/></div>
-      <h3 className="text-sm text-primary mt-6 mb-2">{tr("مجموعات نمط الاسم")}</h3>{stats.nameGroups.length?<ul className="text-xs space-y-1">{stats.nameGroups.slice(0,20).map(g=><li key={g.key} dir="ltr" className="text-start"><b>{g.key}</b>: {g.domains.map(defangDomain).join(', ')}</li>)}</ul>:<p className="text-xs text-muted-foreground">{tr("لا توجد مجموعات")}</p>}
-    </section>
-    <section className="analysis-section mt-6"><h2>{tr("فحص عينة")}</h2><div className="flex items-center gap-3"><Input type="number" min={1} max={pending.length||1} value={n} onChange={e=>setN(Math.max(1,Math.min(Number(e.target.value)||1,pending.length||1)))} className="w-32"/><Button disabled={busy||engine.running||!pending.length} onClick={()=>void scan()}><ScanLine/>{tr("فحص عينة")}</Button><Button variant="outline" disabled={busy||engine.running||!scannedRows.length} onClick={()=>void rescanAll()}><ScanLine/>{tr("إعادة فحص المفحوصة")}</Button><span className="text-xs text-muted-foreground">{pending.length} {tr("رابط لم يُفحص بعد")}</span></div><div className="mt-4"><ProgressCard job={busy&&!engine.running?{stage:tr("يجهز الروابط لقائمة الفحص…")}:engine.job} running={busy||engine.running} onStop={engine.stop}/></div></section>
-    <section className="analysis-section mt-6"><h2>{tr("قياس الدقة")}</h2>
-      <div className="dash-counters">{[[tr("خطر"),acc.red,'red'],[tr("مشبوه"),acc.yellow,'yellow'],[tr("آمن"),acc.green,'green'],[tr("تعذر الفحص"),acc.failed,''],[tr("محذوفة"),acc.removed,''],[tr("نسبة الرصد"),pct(acc.detection),''],[tr("النسبة الصارمة"),pct(acc.strict),'']].map(([l,v,c])=><div key={String(l)} className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></div>)}</div>
-      <p className="text-xs text-muted-foreground">{tr("نسبة الرصد من")} {acc.judged} {tr("رابط قابل للحكم")}</p><p className="text-xs text-muted-foreground">{tr("الروابط من مختص؛ بعضها قد يكون متوقفاً وقت الفحص")}</p>
-      {acc.greens.length>0&&<><h3 className="text-sm text-primary mt-4 mb-2">{tr("روابط صُنفت آمنة (للمراجعة)")}</h3><ul className="text-xs space-y-1" dir="ltr">{acc.greens.map(u=><li key={u} className="text-start break-all">{defangUrl(u)}</li>)}</ul></>}
-      <h3 className="text-sm text-primary mt-6 mb-2">{tr("مقارنة بالإجابة المتوقعة")}</h3>{mx.caught+mx.missed+mx.legitOk+mx.falseAlarm===0?<p className="text-xs text-muted-foreground">{tr("لا توجد روابط بإجابة متوقعة ونتيجة قابلة للحكم")}</p>:<>
-      <div className="matrix"><div><span>{tr("كُشف ✅")}</span><strong style={{color:'var(--success)'}}>{mx.caught}</strong><small className="text-xs text-muted-foreground">{tr("احتيال صُنف خطر/مشبوه")}</small></div><div><span>{tr("فات ❌")}</span><strong style={{color:'var(--destructive)'}}>{mx.missed}</strong><small className="text-xs text-muted-foreground">{tr("احتيال صُنف آمن")}</small></div><div><span>{tr("سليم ✅")}</span><strong style={{color:'var(--success)'}}>{mx.legitOk}</strong><small className="text-xs text-muted-foreground">{tr("سليم صُنف آمن")}</small></div><div><span>{tr("إنذار كاذب ⚠️")}</span><strong style={{color:'var(--warning)'}}>{mx.falseAlarm}</strong><small className="text-xs text-muted-foreground">{tr("سليم صُنف خطر/مشبوه")}</small></div></div>
-      <div className="dash-counters mt-3"><div className="counter dash-counter"><span>{tr("نسبة الكشف")}</span><strong>{opct(mx.detection)}</strong></div><div className="counter dash-counter"><span>{tr("نسبة الإنذار الكاذب")}</span><strong>{opct(mx.falseRate)}</strong></div></div>
-      {([[tr("فات (للمراجعة)"),mx.missedUrls],[tr("إنذار كاذب (للمراجعة)"),mx.falseUrls]] as const).map(([t,us])=>us.length>0&&<div key={t}><h3 className="text-sm text-primary mt-4 mb-2">{t}</h3><ul className="text-xs space-y-1" dir="ltr">{us.map(u=><li key={u} className="text-start break-all">{defangUrl(u)}</li>)}</ul></div>)}</>}
-    </section>
-    <section className="analysis-section mt-6"><h2>{tr("المستبعدة")}</h2><ul className="text-xs space-y-1">{data.filter(r=>r.excluded_reason).slice(0,100).map(r=><li key={r.id} className="flex justify-between gap-3"><span dir="ltr" className="break-all">{defangUrl(r.url)}</span><span className="text-muted-foreground whitespace-nowrap">{r.excluded_reason}</span></li>)}</ul></section>
+    <Card n={tr("٢")} icon={<ArrowDownUp size={16}/>} title={tf("نتيجة الفرز ({0} رابط)",acc.scanned)} action={paste.hasResult?<Button variant="outline" size="sm" onClick={paste.exportCsv}><Download/>{tr("تصدير CSV")}</Button>:undefined}>
+      <div className="x-tiles">
+        <Tile tone="red" icon={<Flame size={16}/>} label={tr("حي وخطر — ابدأ هنا")} value={acc.red}/>
+        <Tile tone="amber" icon={<Eye size={16}/>} label={tr("تحتاج مراجعة")} value={acc.yellow}/>
+        <Tile tone="grey" icon={<Trash2 size={16}/>} label={tr("محذوف أو ميت")} value={dead}/>
+        <Tile tone="green" icon={<ShieldCheck size={16}/>} label={tr("سليم أو رسمي")} value={acc.green}/>
+      </div>
+      <p className="x-summary"><Clock size={14}/>{tf("{0}% من المواقع انحذفت أو توقفت قبل الوصول إليها",deadPct)}</p>
+      {paste.results}
+    </Card>
+    <Card n={tr("٣")} icon={<Fingerprint size={16}/>} title={tr("خيوط للتحقيق")}>
+      <p className="x-hint mb-4">{tr("الإجمالي")} {stats.total} • {tr("مستبعد")} {stats.excluded} • {tr("قابل للفحص")} {stats.scannable}</p>
+      <div className="x-tiles x-tiles-3">
+        <Tile tone="amber" icon={<Megaphone size={16}/>} label={tr("إعلانات قوقل مدفوعة")} value={`${stats.adPct}%`}/>
+        <Tile tone="grey" icon={<Cloud size={16}/>} label={tr("منصات مجانية")} value={`${stats.freePct}%`}/>
+        <Tile tone="red" icon={<Tag size={16}/>} label={tr("يحتوي اسم جهة")} value={`${stats.brandPct}%`}/>
+      </div>
+      <div className="x-two">
+        <div><h3 className="x-sub">{tr("نفس العصابة (نمط الاسم)")}</h3>{stats.nameGroups.length?<><div className="x-chips">{stats.nameGroups.slice(0,20).map(g=><button type="button" key={g.key} dir="ltr" className={`x-chip red${openGroup===g.key?' on':''}`} aria-expanded={openGroup===g.key} onClick={()=>setOpenGroup(o=>o===g.key?null:g.key)}>{g.key} ×{g.domains.length}</button>)}</div>
+          {openGroup&&<ul className="x-domains" dir="ltr">{stats.nameGroups.find(g=>g.key===openGroup)?.domains.map(d=><li key={d}>{defangDomain(d)}</li>)}</ul>}</>:<p className="dash-none">{tr("لا توجد مجموعات")}</p>}</div>
+        <div><h3 className="x-sub">{tr("المنصات")}</h3><BarList data={stats.byPlatform.map(p=>({name:platformLabel(p.name),value:p.value}))} tone="amber"/></div>
+      </div>
+      <h3 className="x-sub mt-5">{tr("كلمات متكررة")}</h3>{stats.topTokens.length?<div className="x-chips">{stats.topTokens.map(t=>{const has=phraseKeys.has(phraseKey(t.name))||added.has(phraseKey(t.name));return <span key={t.name} className="x-chip" dir="ltr">{t.name} ×{t.value}{!has&&t.name.trim().length>=3&&<button type="button" className="x-plus" title={tr("أضف كعبارة صيد")} aria-label={tr("أضف كعبارة صيد")} onClick={()=>void addWord(t.name)}><Plus size={12}/></button>}</span>;})}</div>:<p className="dash-none">—</p>}
+    </Card>
+    <Card n={tr("٤")} icon={<Target size={16}/>} title={tr("قياس الدقة")}>
+      <div className="x-tiles">
+        <Tile tone="green" icon={<ShieldCheck size={16}/>} label={tr("احتيال كُشف ✓")} value={noExpected?'—':mx.caught}/>
+        <Tile tone="red" icon={<Flame size={16}/>} label={tr("احتيال فات ✗")} value={noExpected?'—':mx.missed}/>
+        <Tile tone="green" icon={<ShieldCheck size={16}/>} label={tr("سليم صح ✓")} value={noExpected?'—':mx.legitOk}/>
+        <Tile tone="amber" icon={<Eye size={16}/>} label={tr("إنذار كاذب ⚠")} value={noExpected?'—':mx.falseAlarm}/>
+      </div>
+      {noExpected?<p className="x-hint mt-3">{tr("يتعبّى لما تضيف fraud أو legit بعد كل رابط")}</p>:<p className="x-summary"><span>{tr("نسبة الكشف")}: <b>{opct(mx.detection)}</b></span><span>{tr("نسبة الإنذار الكاذب")}: <b>{opct(mx.falseRate)}</b></span></p>}
+      <p className="x-hint mt-2">{tr("نسبة الرصد")} {pct(acc.detection)} • {tr("النسبة الصارمة")} {pct(acc.strict)} — {tr("نسبة الرصد من")} {acc.judged} {tr("رابط قابل للحكم")}</p>
+      {([[tr("روابط صُنفت آمنة (للمراجعة)"),acc.greens],[tr("فات (للمراجعة)"),mx.missedUrls],[tr("إنذار كاذب (للمراجعة)"),mx.falseUrls]] as const).map(([t,us])=>us.length>0&&<details key={t} className="x-adv"><summary><ChevronDown size={14}/>{t} ({us.length})</summary><ul className="x-domains" dir="ltr">{us.map(u=><li key={u}>{defangUrl(u)}</li>)}</ul></details>)}
+      {data.some(r=>r.excluded_reason)&&<details className="x-adv"><summary><ChevronDown size={14}/>{tr("المستبعدة")}</summary><ul className="text-xs space-y-1 mt-2">{data.filter(r=>r.excluded_reason).slice(0,100).map(r=><li key={r.id} className="flex justify-between gap-3"><span dir="ltr" className="break-all">{defangUrl(r.url)}</span><span className="text-muted-foreground whitespace-nowrap">{r.excluded_reason}</span></li>)}</ul></details>}
+    </Card>
     </>}
   </div>;
 }
 
 type Row={id:string;url:string;batch:string|null;link_id:string|null;excluded_reason:string|null;created_at:string};
 /** Paste up to 500 URLs (hidden test set), import like the CSV, queue them, and show live verdicts with CSV export. */
-function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
+function usePasteBatch(rows:Row[],level:(id:string)=>string|null){
   const engine=useEngine(),qc=useQueryClient(),queue=useServerFn(scanExpertSample);
   const [text,setText]=useState(''),[busy,setBusy]=useState(false),[batch,setBatch]=useState<string|null>(null);
   const latest=batch ?? [...rows].reverse().find(r=>r.batch?.startsWith('قائمة ملصوقة'))?.batch ?? null;
@@ -86,14 +123,13 @@ function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
   }catch(e){toast.error(e instanceof Error?e.message:tr("تعذر استيراد القائمة"));}finally{setBusy(false);}}
   function exportCsv(){const blob=new Blob(['\uFEFF'+resultsCsv(result)],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sayyad-results.csv';a.click();URL.revokeObjectURL(a.href);}
   const word=(l:string|null,score:number|null=null,signals?:unknown)=>l==='red'?tr("خطر"):l==='yellow'?(needsReview({level:'yellow',score:score ?? 0,signals})?tr("تحتاج مراجعة"):tr("مشبوه")):l==='green'?tr("آمن"):l==='removed'?tr("محذوفة"):l==='failed'?tr("تعذر الفحص"):l==='excluded'?tr("مستبعد"):tr("بالانتظار");
-  return <section className="analysis-section mb-6"><h2>{tr("فحص قائمة روابط")}</h2>
-    <p className="text-xs text-muted-foreground mb-2">{tr("رابط في كل سطر (يُقبل الشكل المعطّل مثل hxxps://site[.]com)، ويمكن إضافة فاصلة ثم fraud أو legit. الحد 500 رابط.")}</p>
+  const input=(extra:React.ReactNode)=><>
     <Textarea dir="ltr" rows={6} className="mono text-start" spellCheck={false} value={text} onChange={e=>setText(e.target.value)} placeholder={'hxxps://example[.]com/pay,fraud\nhttps://example.org,legit'}/>
-    <div className="flex items-center gap-3 mt-3"><Button disabled={busy||!lines||lines>500} onClick={()=>void submit()}><ScanLine/>{busy?tr("جارٍ الاستيراد…"):tr("استيراد وفحص")}</Button><span className={`text-xs ${lines>500?'text-destructive':'text-muted-foreground'}`}>{lines} / 500</span></div>
-    {latest&&<div className="mt-4"><div className="flex items-center justify-between gap-3 mb-2"><span className="text-sm">{latest} {tr("— اكتمل")} {done} {tr("من")} {total}</span><Button variant="outline" size="sm" disabled={!result.length} onClick={exportCsv}><Upload/>{tr("تصدير CSV")}</Button></div>
+    <div className="flex flex-wrap items-center gap-3 mt-3"><Button className="gold-btn" disabled={busy||!lines||lines>500} onClick={()=>void submit()}><ScanLine/>{busy?tr("جارٍ الاستيراد…"):tr("فحص القائمة")}</Button>{extra}<span className={`text-xs ms-auto ${lines>500?'text-destructive':'text-muted-foreground'}`}>{lines} / 500</span></div></>;
+  const results=latest?<div className="mt-4"><div className="text-sm mb-2">{latest} {tr("— اكتمل")} {done} {tr("من")} {total}</div>
       <div className="h-2 rounded bg-muted overflow-hidden mb-3"><div className="h-full bg-primary transition-all" style={{width:`${total?Math.round(done*100/total):0}%`}}/></div>
       <ProgressCard job={engine.job} running={engine.running} onStop={engine.stop}/>
       <div className="overflow-x-auto mt-3"><table className="w-full text-xs"><thead><tr className="text-muted-foreground"><th className="text-start p-1">{tr("الرابط")}</th><th className="text-start p-1">{tr("الحكم")}</th><th className="text-start p-1">{tr("السبب الرئيسي")}</th><th className="text-start p-1">{tr("الوجهة النهائية")}</th></tr></thead>
-      <tbody>{result.map(r=><tr key={r.id} className="border-t border-border"><td dir="ltr" className="p-1 text-start break-all mono">{defangUrl(r.url)}</td><td className="p-1 whitespace-nowrap">{r.level==='red'||r.level==='yellow'||r.level==='green'?<RiskBadge level={r.level} score={r.score ?? 0} signals={r.signals}/>:word(r.level,r.score,r.signals)}</td><td className="p-1">{r.top_reason ?? '—'}</td><td dir="ltr" className="p-1 text-start break-all mono">{r.final_url&&r.final_url!==r.url?defangUrl(r.final_url):'—'}</td></tr>)}</tbody></table></div></div>}
-  </section>;
+      <tbody>{result.map(r=><tr key={r.id} className="border-t border-border"><td dir="ltr" className="p-1 text-start break-all mono">{defangUrl(r.url)}</td><td className="p-1 whitespace-nowrap">{r.level==='red'||r.level==='yellow'||r.level==='green'?<RiskBadge level={r.level} score={r.score ?? 0} signals={r.signals}/>:word(r.level,r.score,r.signals)}</td><td className="p-1">{r.top_reason ?? '—'}</td><td dir="ltr" className="p-1 text-start break-all mono">{r.final_url&&r.final_url!==r.url?defangUrl(r.final_url):'—'}</td></tr>)}</tbody></table></div></div>:null;
+  return {input,results,exportCsv,hasResult:result.length>0};
 }

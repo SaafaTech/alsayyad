@@ -1,5 +1,6 @@
 import { tr, tf } from '@/lib/i18n';
 import { platformLabel } from '@/lib/sayyad/rules';
+import { BarList } from '@/components/sayyad/bar-list';
 import { createFileRoute,Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -33,13 +34,6 @@ function Donut({data}:{data:D[]}){
   const shown=rows.filter(r=>r.value>0);
   return <div className="donut-wrap"><div className="donut-chart"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={shown} dataKey="value" nameKey="name" innerRadius="65%" outerRadius="100%" paddingAngle={shown.length>1?2:0} cornerRadius={6} stroke="none" isAnimationActive={!noMotion()}>{shown.map(d=><Cell key={d.key} fill={riskColor[d.key ?? '']}/>)}</Pie><Tooltip content={<TipCard/>}/></PieChart></ResponsiveContainer><div className="donut-center"><strong>{total}</strong><span>{tr("رابط")}</span></div></div>
     <ul className="donut-legend">{rows.map(d=><li key={d.key}><i style={{background:riskColor[d.key ?? '']}}/><span>{tr(riskLabel[d.key ?? ''] ?? d.name)}</span><b>{d.value}</b><small>{Math.round(d.value*100/total)}%</small></li>)}</ul></div>;
-}
-function BarList({data,tone}:{data:D[];tone:'gold'|'amber'}){
-  const sorted=[...data].filter(d=>d.value>0).sort((a,b)=>b.value-a.value);if(!sorted.length)return <Empty/>;
-  const other=sorted.filter(d=>d.name==='other'||d.name==='أخرى'),main=sorted.filter(d=>!other.includes(d));
-  let rows:D[]=main.slice(0,6);if(other.length||main.length>6){const keep=main.slice(0,5);rows=[...keep,{name:'أخرى',value:sorted.filter(d=>!keep.includes(d)).reduce((x,d)=>x+d.value,0)}];}
-  const max=Math.max(...rows.map(r=>r.value));
-  return <ul className={`bar-list ${tone}`}>{rows.map(r=><li key={r.name} title={`${tr(r.name)}: ${r.value}`}><span className="bl-name">{tr(r.name)}</span><span className="bl-track"><span className="bl-fill" style={{width:`${Math.max(4,r.value*100/max)}%`}}/></span><b>{r.value}</b></li>)}</ul>;
 }
 function Timeline({data}:{data:D[]}){
   if(!data.some(d=>d.value>0))return <Empty/>;
