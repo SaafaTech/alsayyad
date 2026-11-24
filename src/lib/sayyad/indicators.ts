@@ -71,3 +71,12 @@ export function asIndicators(v:unknown):Indicators|null{
   if(!v||typeof v!=='object'||Array.isArray(v))return null;const o=v as Record<string,unknown>;const arr=(k:string)=>Array.isArray(o[k])?o[k] as never[]:[];
   return {phones:arr('phones'),whatsapp:arr('whatsapp'),ibans:arr('ibans'),accounts:arr('accounts'),socials:arr('socials'),links:arr('links')};
 }
+export type LinkGroup={key:string;host:string;path:string;urls:string[]};
+/** Group links by host+path ignoring query and hash (display only). */
+export function groupLinks(links:string[]):LinkGroup[]{
+  const m=new Map<string,LinkGroup>();
+  for(const l of links){let host=l,path='';try{const u=new URL(l);host=u.hostname.toLowerCase();path=u.pathname==='/'?'':u.pathname;}catch{}
+    const key=host+path;const g=m.get(key);if(g)g.urls.push(l);else m.set(key,{key,host,path,urls:[l]});}
+  return [...m.values()];
+}
+export const safeDecode=(s:string)=>{try{return decodeURIComponent(s);}catch{return s;}};

@@ -7,3 +7,5 @@ describe('indicators',()=>{
   it('keeps instagram profiles and drops posts',()=>{expect(canonicalSocial('https://www.instagram.com/scam.shop/?hl=en')).toEqual({platform:'instagram',url:'https://instagram.com/scam.shop'});expect(canonicalSocial('https://instagram.com/p/xxx')).toBeNull();});
   it('dedupes links and excludes own domain',()=>{expect(outgoingLinks(['https://example.com/a','/b','https://other.example.org/x','https://other.example.org/x#f'],'https://example.com/')).toEqual(['https://other.example.org/x']);});
 });
+import { groupLinks } from '@/lib/sayyad/indicators';
+describe('link grouping',()=>{it('groups links differing only by query and hash',()=>{const g=groupLinks(['https://a.example.com/p?utm_source=x','https://a.example.com/p?utm_source=y#z','https://a.example.com/q']);expect(g.length).toBe(2);expect(g[0]?.urls.length).toBe(2);});});
