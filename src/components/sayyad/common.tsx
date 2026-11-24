@@ -25,9 +25,9 @@ export function AppShell(){const {email}=useSession(),qc=useQueryClient(),naviga
 }
 export function ComingSoon({title}:{title:string}) {return <div className="coming-soon"><FileText size={44} className="text-primary"/><h1>{title}</h1><span className="text-muted-foreground">قريباً</span></div>;}
 
-const readTheme=()=>{try{return localStorage.getItem('sayyad-theme')==='light'?'light':'dark';}catch{return 'dark';}};
+const readTheme=()=>{try{return localStorage.getItem('sayyad-theme')==='dark'?'dark':'light';}catch{return 'light';}};
 export function applyTheme(theme:'light'|'dark'){document.documentElement.classList.toggle('light',theme==='light');document.documentElement.classList.toggle('dark',theme==='dark');}
-export function ThemeToggle(){const [theme,setTheme]=useState<'light'|'dark'>('dark');
+export function ThemeToggle(){const [theme,setTheme]=useState<'light'|'dark'>('light');
   useEffect(()=>{const t=readTheme();setTheme(t);applyTheme(t);},[]);
   const toggle=()=>{const t=theme==='light'?'dark':'light';setTheme(t);applyTheme(t);try{localStorage.setItem('sayyad-theme',t);}catch{/* storage unavailable */}};
   return <Button variant="ghost" size="icon" aria-label={theme==='light'?'الوضع الداكن':'الوضع الفاتح'} title={theme==='light'?'الوضع الداكن':'الوضع الفاتح'} onClick={toggle}>{theme==='light'?<Moon/>:<Sun/>}</Button>;}

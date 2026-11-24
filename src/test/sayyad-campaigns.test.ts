@@ -18,6 +18,13 @@ describe('Campaign clustering',()=>{
   it('free platforms with same IP but different entities are not joined',()=>{const a=link({platform:'netlify'}),b=link({platform:'netlify'});const h={ip:'1.2.3.4'};expect(clusterCampaigns({links:[a,b],analyses:[an(a.id,{hosting:h,impersonated_entity_id:'e1'}),an(b.id,{hosting:h,impersonated_entity_id:'e2'})],entities:[ent]})).toHaveLength(0);expect(clusterCampaigns({links:[a,b],analyses:[an(a.id,{hosting:h,impersonated_entity_id:'e1'}),an(b.id,{hosting:h,impersonated_entity_id:'e1'})],entities:[ent]})).toHaveLength(1);});
   it('non-free platforms still join on same IP alone',()=>{const a=link({}),b=link({});const h={ip:'1.2.3.4'};expect(clusterCampaigns({links:[a,b],analyses:[an(a.id,{hosting:h}),an(b.id,{hosting:h})],entities:[]})).toHaveLength(1);});
   it('withoutExpert hides expert_sample hunts, links and analyses',()=>{type W=Parameters<typeof withoutExpert>[0];const d=withoutExpert({hunts:[{id:'h',source:'expert_sample'}],links:[{id:'x',hunt_id:'h'},{id:'y',hunt_id:null}],analyses:[{link_id:'x'},{link_id:'y'}]} as unknown as W);expect(d.links.map(l=>l.id)).toEqual(['y']);expect(d.analyses).toHaveLength(1);expect(d.hunts).toHaveLength(0);});
+  it('a red link later removed stays a member using its last red history row',()=>{const a=link({id:'ra'}),b=link({id:'rb',parent_link_id:'ra'});
+    const removed={...an('rb',{level:'yellow'}),score:0,signals:{removed:true}};
+    const history=[{link_id:'rb',archived_at:'2026-11-24T09:00:00Z',analysis:{...an('rb',{level:'red'}),score:95}},{link_id:'rb',archived_at:'2026-11-24T08:00:00Z',analysis:{...an('rb',{level:'yellow'}),score:40}}];
+    const c=clusterCampaigns({links:[a,b],analyses:[{...an('ra'),score:80},removed],entities:[],history});
+    expect(c).toHaveLength(1);expect(c[0]!.signals.members['rb']).toEqual({removed:true,old_score:95,score:0});expect(c[0]!.signals.members['ra']!.removed).toBe(false);
+    expect(c[0]!.links.find(l=>l.link_id==='rb')!.reasons_ar).toEqual([R.chain]);expect(c[0]!.signals.edges).toEqual([{a:'ra',b:'rb',reasons_ar:[R.chain]}]);
+    expect(clusterCampaigns({links:[a,b],analyses:[an('ra'),removed],entities:[]})).toHaveLength(0);});
 });
 describe('Expert import',()=>{
   it('parses quoted CSV fields with BOM',()=>{expect(parseCsv('\uFEFFurl,note\n"https://a.example.com/x,y","say ""hi"""\r\n')).toEqual([['url','note'],['https://a.example.com/x,y','say "hi"']]);});

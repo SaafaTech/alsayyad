@@ -7,7 +7,7 @@ type Workspace=Awaited<ReturnType<typeof getWorkspace>>;
 export type Job={stage:string;done:number;total:number;active:number;finished:boolean};
 /** Rough remaining seconds: Cloudflare allows one start per ~10 s and each scan takes ~30 s. */
 export const etaSeconds=(remaining:number)=>remaining<=0?0:Math.round(remaining*10+30);
-type Engine={data:Workspace|undefined;loading:boolean;error:string|null;running:boolean;progress:string;job:Job|null;recent:Set<string>;runSearch:(phrase:string,source:'google'|'maps')=>Promise<void>;startHunt:()=>Promise<void>;checkLink:(url:string)=>Promise<string|null>;stop:()=>void;resume:()=>Promise<void>};
+type Engine={data:Workspace|undefined;loading:boolean;error:string|null;running:boolean;progress:string;job:Job|null;recent:Set<string>;runIds:string[];autoResume:()=>void;runSearch:(phrase:string,source:'google'|'maps')=>Promise<void>;startHunt:()=>Promise<void>;checkLink:(url:string)=>Promise<string|null>;stop:()=>void;resume:()=>Promise<void>};
 type QueueLink={id:string;status:string;parent_link_id:string|null};
 /** Ids in scope for a run: everything, or one link plus every link it queued (and their children). */
 export function scopeIds(links:QueueLink[],onlyId?:string) {
@@ -27,7 +27,7 @@ export function useEngine(){const c=useContext(Context);if(!c)throw new Error('M
 export function EngineProvider({children}:{children:ReactNode}) {
   const fetch=useServerFn(getWorkspace),google=useServerFn(searchGoogle),maps=useServerFn(searchMaps),scan=useServerFn(scanLink),poll=useServerFn(pollScan),manual=useServerFn(addManualLink);
   const query=useQuery({queryKey:['workspace'],queryFn:()=>fetch(),refetchInterval:5000});
-  const [running,setRunning]=useState(false),[progress,setProgressText]=useState('جاهز للصيد'),[job,setJob]=useState<Job|null>(null),[recent,setRecent]=useState<Set<string>>(new Set());
+  const [running,setRunning]=useState(false),[progress,setProgressText]=useState('جاهز للصيد'),[job,setJob]=useState<Job|null>(null),[recent,setRecent]=useState<Set<string>>(new Set()),[runIds,setRunIds]=useState<string[]>([]);
   const lastTargets=useRef<Set<string>>(new Set()),clearJob=useRef<ReturnType<typeof setTimeout>|null>(null);
   const setProgress=(stage:string,counts?:Partial<Job>)=>{setProgressText(stage);setJob(j=>({stage,done:counts?.done ?? 0,total:counts?.total ?? 0,active:counts?.active ?? 0,finished:counts?.finished ?? false,...(counts?.total===undefined&&j&&!j.finished?{done:j.done,total:j.total,active:j.active}:{})}));};
   const active=useRef(false),cancel=useRef(false);
@@ -44,7 +44,7 @@ export function EngineProvider({children}:{children:ReactNode}) {
         if(['pending','scanning'].includes(link.status))targets.add(link.id);
         if(targets.has(link.id)&&!['pending','scanning'].includes(link.status))completed.add(link.id);
       }
-      lastTargets.current=targets;
+      lastTargets.current=targets;setRunIds(ids=>ids.length===targets.size?ids:[...targets]);
       scanProgress();
     };
     const scanProgress=()=>setProgress(targets.size?`يفحص ${completed.size+submitted.size} من ${targets.size} ويحلل بالذكاء الاصطناعي (كل فحص ~30 ثانية)`:'لا توجد روابط جديدة للفحص',{done:completed.size,total:targets.size,active:submitted.size});
@@ -90,13 +90,18 @@ export function EngineProvider({children}:{children:ReactNode}) {
     for(const result of workers)if(result.status==='rejected')errors.push(result.reason);
     if(errors.length)throw errors[0];
   }
-  async function run(task:()=>Promise<void>) {if(active.current)return;active.current=true;cancel.current=false;lastTargets.current=new Set();if(clearJob.current)clearTimeout(clearJob.current);setRunning(true);setProgress('يبدأ…');
+  async function run(task:()=>Promise<void>) {if(active.current)return;active.current=true;cancel.current=false;lastTargets.current=new Set();setRunIds([]);if(clearJob.current)clearTimeout(clearJob.current);setRunning(true);setProgress('يبدأ…');
     try{await task();const data=await refresh();const ids=lastTargets.current;const as=(data?.analyses ?? []).filter(a=>ids.has(a.link_id));const red=as.filter(a=>a.level==='red').length,yellow=as.filter(a=>a.level==='yellow').length;
       setProgress(cancel.current?'تم إيقاف الصيد بأمان':`اكتمل: ${red} خطر، ${yellow} مشبوه`,{done:ids.size,total:ids.size,finished:true});setRecent(new Set(ids));setTimeout(()=>setRecent(new Set()),12000);}
     catch(e){const msg=e instanceof Error?e.message:'تعذر إكمال العملية';setProgress('توقفت العملية؛ تحقق من الإعدادات',{finished:true});toast.error(msg);}
-    finally{active.current=false;setRunning(false);clearJob.current=setTimeout(()=>setJob(null),10000);await query.refetch();}}
+    finally{active.current=false;setRunning(false);clearJob.current=setTimeout(()=>{setJob(null);setRunIds([]);},10000);await query.refetch();}}
+  const hasQueue=(d:Workspace|undefined)=>!!d?.links.some(l=>l.status==='pending'||l.status==='scanning');
+  const autoResume=()=>{if(!active.current&&hasQueue(query.data))void run(()=>drain());};
+  // Pending links left from an earlier session start draining automatically once data loads.
+  const autoStarted=useRef(false);
+  useEffect(()=>{if(autoStarted.current||!query.data)return;autoStarted.current=true;autoResume();},[query.data]);
   const found=(before:Workspace|undefined,after:Workspace|undefined)=>Math.max(0,(after?.links.length ?? 0)-(before?.links.length ?? 0));
-  const value:Engine={data:query.data,loading:query.isPending,error:query.error?'تعذر تحميل بيانات التحقيق':null,running,progress,job,recent,
+  const value:Engine={data:query.data,loading:query.isPending,error:query.error?'تعذر تحميل بيانات التحقيق':null,running,progress,job,recent,runIds,autoResume,
     runSearch:async(phrase,source)=>{if(!phrase.trim())return;await run(async()=>{setProgress(source==='google'?'يبحث في Google…':'يبحث في الخرائط…');const before=query.data;await (source==='google'?google:maps)({data:{phrase}});const after=await refresh();setProgress(`وجد ${found(before,after)} روابط جديدة`);await new Promise(r=>setTimeout(r,800));await drain();});},
     startHunt:async()=>{await run(async()=>{const data=await refresh();const phrases=data?.phrases ?? [];for(const [i,p] of phrases.entries()){if(cancel.current)break;setProgress(`يبحث في Google… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await google({data:{phrase:p.phrase}});await refresh();if(cancel.current)break;setProgress(`يبحث في الخرائط… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await maps({data:{phrase:p.phrase}});await refresh();}if(!cancel.current)await drain();});},
     checkLink:async(url)=>{if(active.current)return null;try{const link=await manual({data:{url}});await refresh();return link.id;}catch(e){toast.error(e instanceof Error?e.message:'رابط غير صالح');return null;}},

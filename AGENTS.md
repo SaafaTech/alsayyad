@@ -39,3 +39,4 @@ use the editor.
 - Campaigns are rebuilt by deterministic pure rules (src/lib/sayyad/campaigns.ts) and written only by a service-role transaction function; analyses keeps one latest row per link and re-scans archive the old row into analysis_history, so all existing link_id lookups stay valid.
 - Expert validation rows are owner-only and links from expert_sample hunts are filtered out of every aggregate via withoutExpert; expert URLs never enter code, migrations or tests.
 - Name similarity comes from the domain (path only on free platforms); generic place words never identify an entity, and path/title mentions need AI confirmation of the same entity; this avoids geo and blog false positives.
+- Removed campaign members keep membership via their latest red analysis_history row; per-member removed/old_score and join edges live in campaigns.signals so no schema change is needed.

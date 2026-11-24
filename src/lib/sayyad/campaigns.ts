@@ -2,7 +2,9 @@ import { getPublicSuffix } from 'tldts';
 import type { Tables } from '@/integrations/supabase/types';
 import { normalizePhone, registrationDomain, freePlatform } from './rules';
 type Link=Pick<Tables<'links'>,'id'|'url'|'domain'|'platform'|'parent_link_id'|'maps_phone'|'first_seen_at'|'hunt_id'>;
-type Analysis=Pick<Tables<'analyses'>,'link_id'|'level'|'phones_found'|'hosting'|'page_title'|'impersonated_entity_id'|'created_at'>;
+type Analysis=Pick<Tables<'analyses'>,'link_id'|'level'|'phones_found'|'hosting'|'page_title'|'impersonated_entity_id'|'created_at'>&{score?:number;signals?:unknown};
+export type HistoryRow={link_id:string;archived_at:string;analysis:unknown};
+const isRemoved=(a:Analysis)=>!!a.signals&&typeof a.signals==='object'&&(a.signals as Record<string,unknown>)['removed']===true;
 type Entity=Pick<Tables<'entities'>,'id'|'name_ar'|'official_phones'|'official_domains'>;
 export const R={chain:'مرتبطة بسلسلة تحويل',host:'نفس الاستضافة',title:'نفس قالب الصفحة',name:'نفس نمط الاسم'} as const;
 export const phoneReason=(p:string)=>`نفس رقم الهاتف: ****${p.slice(-4)}`;
@@ -29,11 +31,14 @@ export function withoutExpert<T extends {hunts:Tables<'hunts'>[];links:Tables<'l
   const links=d.links.filter(l=>!l.hunt_id||!hidden.has(l.hunt_id));const ids=new Set(links.map(l=>l.id));
   return {...d,hunts:d.hunts.filter(h=>!hidden.has(h.id)),links,analyses:d.analyses.filter(a=>ids.has(a.link_id))};
 }
-export type CampaignDraft={entity_id:string|null;name_ar:string;first_seen_at:string;last_seen_at:string;link_count:number;signals:{reasons_ar:string[];platforms:string[]};links:{link_id:string;reasons_ar:string[]}[]};
+export type CampaignDraft={entity_id:string|null;name_ar:string;first_seen_at:string;last_seen_at:string;link_count:number;signals:{reasons_ar:string[];platforms:string[];members:Record<string,{removed:boolean;old_score:number|null;score:number|null}>;edges:{a:string;b:string;reasons_ar:string[]}[]};links:{link_id:string;reasons_ar:string[]}[]};
 /** Deterministic red-only clustering (union-find). */
-export function clusterCampaigns(input:{links:Link[];analyses:Analysis[];entities:Entity[];excludedHuntIds?:Set<string>}):CampaignDraft[]{
+export function clusterCampaigns(input:{links:Link[];analyses:Analysis[];entities:Entity[];excludedHuntIds?:Set<string>;history?:HistoryRow[]}):CampaignDraft[]{
   const byId=new Map(input.links.map(l=>[l.id,l]));
   const latest=new Map<string,Analysis>();for(const a of input.analyses){const p=latest.get(a.link_id);if(!p||p.created_at<a.created_at)latest.set(a.link_id,a);}
+  // A taken-down page keeps its campaign membership through its most recent red archived analysis.
+  const removedFrom=new Map<string,Analysis>();
+  for(const [id,a] of latest)if(isRemoved(a)){const h=(input.history ?? []).filter(r=>r.link_id===id&&(r.analysis as Analysis|null)?.level==='red').sort((x,y)=>y.archived_at.localeCompare(x.archived_at))[0];if(h){const old=h.analysis as Analysis;latest.set(id,{...old,link_id:id,created_at:old.created_at ?? h.archived_at});removedFrom.set(id,a);}}
   const red=input.links.filter(l=>latest.get(l.id)?.level==='red'&&!(l.hunt_id&&input.excludedHuntIds?.has(l.hunt_id)));
   const official=new Set(input.entities.flatMap(e=>e.official_phones.map(uaeCanonical)));
   const root=(l:Link)=>{let c=l;const seen=new Set<string>();while(c.parent_link_id&&!seen.has(c.id)){seen.add(c.id);const p=byId.get(c.parent_link_id);if(!p)return c.parent_link_id;c=p;}return c.id;};
@@ -43,7 +48,8 @@ export function clusterCampaigns(input:{links:Link[];analyses:Analysis[];entitie
     return {l,a,root:root(l),phones,ip:h.ip ?? null,asn:h.asn ?? null,title:t.length>=8?t:null,name:namePattern(l.url,l.domain,l.platform)};});
   const parent=red.map((_,i)=>i);const find=(i:number):number=>parent[i]===i?i:(parent[i]=find(parent[i]!));
   const reasons=red.map(()=>new Set<string>());
-  const join=(i:number,j:number,r:string)=>{parent[find(i)]=find(j);reasons[i]!.add(r);reasons[j]!.add(r);};
+  const pairs=new Map<string,{a:number;b:number;r:Set<string>}>();
+  const join=(i:number,j:number,r:string)=>{parent[find(i)]=find(j);reasons[i]!.add(r);reasons[j]!.add(r);const k=`${i}|${j}`;const e=pairs.get(k) ?? {a:i,b:j,r:new Set<string>()};e.r.add(r);pairs.set(k,e);};
   for(let i=0;i<facts.length;i++)for(let j=i+1;j<facts.length;j++){const x=facts[i]!,y=facts[j]!;
     if(x.l.parent_link_id===y.l.id||y.l.parent_link_id===x.l.id||x.root===y.root)join(i,j,R.chain);
     for(const p of x.phones)if(y.phones.has(p))join(i,j,phoneReason(p));
@@ -62,7 +68,9 @@ export function clusterCampaigns(input:{links:Link[];analyses:Analysis[];entitie
     const platforms=[...new Set(m.map(f=>f.l.platform))];
     const dates=m.flatMap(f=>[f.l.first_seen_at,f.a.created_at]).sort();
     out.push({entity_id:entityId,name_ar:`${entity?`حملة انتحال ${entity.name_ar}`:'حملة غير مصنفة'} — ${platforms[0]}`,first_seen_at:dates[0]!,last_seen_at:dates[dates.length-1]!,link_count:m.length,
-      signals:{reasons_ar:[...new Set(idx.flatMap(i=>[...reasons[i]!]))],platforms},links:idx.map(i=>({link_id:facts[i]!.l.id,reasons_ar:[...reasons[i]!]}))});
+      signals:{reasons_ar:[...new Set(idx.flatMap(i=>[...reasons[i]!]))],platforms,
+        members:Object.fromEntries(idx.map(i=>{const f=facts[i]!,gone=removedFrom.has(f.l.id);return [f.l.id,{removed:gone,old_score:gone?(f.a.score ?? null):null,score:gone?0:(f.a.score ?? null)}];})),
+        edges:[...pairs.values()].filter(e=>idx.includes(e.a)).map(e=>({a:facts[e.a]!.l.id,b:facts[e.b]!.l.id,reasons_ar:[...e.r]}))},links:idx.map(i=>({link_id:facts[i]!.l.id,reasons_ar:[...reasons[i]!]}))});
   }
   return out.sort((a,b)=>b.link_count-a.link_count);
 }
