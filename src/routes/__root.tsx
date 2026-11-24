@@ -74,9 +74,7 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
-    // Replace these placeholders with the app's name and description when first building the app.
-    // Each content route, / included, must still set its own head(). Never add og:image or
-    // twitter:image here: every page without its own would inherit the root's preview image.
+    // Sitewide share preview by owner request: every page shares the same Sayyad card image.
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
@@ -84,9 +82,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "description", content: "منصة الرصد غير المباشر للروابط الاحتيالية" },
       { name: "author", content: "Lovable" },
       { property: "og:title", content: "الصيّاد | Sayyad" },
-      { property: "og:description", content: "منصة الرصد غير المباشر للروابط الاحتيالية" },
+      { property: "og:description", content: "منصة الرصد الاستباقي للروابط الاحتيالية وانتحال الجهات الإماراتية." },
       { property: "og:type", content: "website" },
+      { property: "og:url", content: "https://alsayyad.lovable.app" },
+      { property: "og:image", content: "https://alsayyad.lovable.app/og.png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { property: "og:image:type", content: "image/png" },
+      { property: "og:locale", content: "ar_AE" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:image", content: "https://alsayyad.lovable.app/og.png" },
       { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
@@ -96,6 +101,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: appCss,
       },
       { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "icon", href: "/icon-512.png", type: "image/png", sizes: "512x512" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
