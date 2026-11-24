@@ -78,29 +78,47 @@ export async function aiAnalyze(input:{url:string;final_url:string;page_title:st
   if(!call || call.type!=='function_call')throw new Error('تعذر استخراج تحليل موثوق من الذكاء الاصطناعي');
   return aiSchema.parse(JSON.parse(call.arguments));
 }
-const reportSchema=z.object({page:z.object({url:z.string(),title:z.string().optional(),text:z.string().optional(),status:z.union([z.string(),z.number()]).optional()}),task:z.object({success:z.boolean().optional()}).optional(),data:z.object({text:z.string().optional(),pageText:z.string().optional(),links:z.array(z.object({href:z.string(),text:z.string().optional()})).optional()}).optional(),lists:z.object({domains:z.array(z.string()).optional(),linkDomains:z.array(z.string()).optional()}).optional()});
+const reportString=z.string().optional().catch(undefined);
+const reportSchema=z.object({page:z.object({url:reportString,title:reportString,text:reportString,status:z.union([z.string(),z.number()]).optional().catch(undefined)}).optional().catch(undefined),task:z.object({status:reportString,success:z.boolean().optional().catch(undefined)}).optional().catch(undefined),data:z.object({text:reportString,pageText:reportString,links:z.array(z.object({href:reportString,text:reportString})).optional().catch(undefined)}).optional().catch(undefined),lists:z.object({domains:z.array(z.string()).optional().catch(undefined),linkDomains:z.array(z.string()).optional().catch(undefined)}).optional().catch(undefined)}).catch({});
 export function parseReport(json:unknown) {
-  const envelope=z.object({result:z.unknown().optional()}).passthrough().parse(json);
+  const envelope=z.object({result:z.unknown().optional()}).passthrough().catch({}).parse(json);
   return reportSchema.parse(envelope.result ?? json);
 }
+export function reportState(report:ReturnType<typeof parseReport>,startedAt:string|null,now=Date.now()):'scanning'|'unscannable'|'finished' {
+  const status=(report.task?.status ?? '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
+  const pending=['queued','pending','running','in progress'].includes(status);
+  const finished=!pending && (['finished','complete'].includes(status)||!!report.page?.url);
+  const started=Date.parse(startedAt ?? '');
+  if(!finished)return Number.isFinite(started)&&now-started<90000?'scanning':'unscannable';
+  return report.task?.success===false||!report.page?.url?'unscannable':'finished';
+}
+export async function markUnscannable(db:Db,id:string) {
+  must(await db.from('links').update({status:'unscannable',scan_error:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',id));
+  return {status:'unscannable'} as const;
+}
 export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<typeof parseReport>,base:string,headers:Record<string,string>) {
-  const es=await entities(db);const finalUrl=cleanUrl(report.page.url);const finalDomain=hostname(finalUrl);const redirect=finalDomain!==hostname(link.url)?[`الرابط يحوّل إلى نطاق آخر: ${finalDomain}`]:[];
+  const state=reportState(report,link.scan_started_at);
+  if(state==='scanning')return {status:'scanning'} as const;
+  const page=report.page;
+  if(state==='unscannable'||!page?.url)return markUnscannable(db,link.id);
+  const status=Number(page.status);
+  if(status>=400)return markUnscannable(db,link.id);
+  const es=await entities(db);const finalUrl=cleanUrl(page.url);const finalDomain=hostname(finalUrl);const redirect=finalDomain!==hostname(link.url)?[`الرابط يحوّل إلى نطاق آخر: ${finalDomain}`]:[];
   must(await db.from('links').update({final_url:finalUrl,domain:finalDomain,platform:platformFor(finalDomain)}).eq('id',link.id));
   const official=officialMatch(finalDomain,es);
-  if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return;}
-  const status=Number(report.page.status);
-  if(report.task?.success===false || !status || status>=400) {must(await db.from('links').update({status:'unscannable',scan_error:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));return;}
+  if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return {status:'official'} as const;}
   const dom=await providerFetch(`${base}/dom/${link.scan_uuid}`,{headers});
   const domReasons=dom.ok?[]:['تعذر قراءة نص الصفحة من تقرير Cloudflare؛ التحليل مبني على العنوان والروابط فقط'];
   if(!dom.ok)console.warn(`Cloudflare DOM HTTP ${dom.status}; continuing with report-only analysis`);
   const domRaw=dom.ok?(await dom.text()).slice(0,500000):'';
   const text=domRaw.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,6000);
-  const outgoing=(report.data?.links ?? []).flatMap(l=>{try{return [cleanUrl(new URL(l.href,finalUrl).href)];}catch{return [];}});
+  const outgoing=(report.data?.links ?? []).flatMap(l=>{if(!l.href)return [];try{return [cleanUrl(new URL(l.href,finalUrl).href)];}catch{return [];}});
   const outgoingDomains=[...new Set([...outgoing.map(hostname),...(report.lists?.linkDomains ?? [])])].filter(d=>d!==finalDomain);
   const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform,headers['Authorization'] ?? '');
-  const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:report.page.title ?? '',page_text:text,...(!dom.ok?{report_text:[report.page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000)}:{}),outgoing_domains:outgoingDomains,entities:es});
+  const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:page.title ?? '',page_text:text,...(!dom.ok?{report_text:[page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000)}:{}),outgoing_domains:outgoingDomains,entities:es});
   const scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
-  must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:report.page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...redirect,...domReasons],ai_summary_ar:ai.summary_ar}));
+  must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...redirect,...domReasons],ai_summary_ar:ai.summary_ar}));
   if(['linktree','wix','google_sites'].includes(platform) && link.hunt_id)for(const url of chainDestinations(outgoing.filter(u=>hostname(u)!==finalDomain),es,link.depth)) await addLink(db,{url,hunt_id:link.hunt_id,parent_link_id:link.id,depth:link.depth+1},es);
   must(await db.from('links').update({status:'done'}).eq('id',link.id));
+  return {status:'done'} as const;
 }
