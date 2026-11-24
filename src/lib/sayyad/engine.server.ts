@@ -135,9 +135,14 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
   const official=officialMatch(finalDomain,es);
   if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return {status:'official'} as const;}
   const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {status:'scanning'} as const;
-  const dom=await providerFetch(`${base}/dom/${link.scan_uuid}`,{headers});
+  let domUrl=`${base}/dom/${link.scan_uuid}`;
+  if(report.task?.domURL)try {
+    const candidate=new URL(report.task.domURL);
+    if(candidate.hostname==='api.cloudflare.com'&&candidate.protocol==='https:'&&!candidate.username&&!candidate.password)domUrl=candidate.href;
+  } catch { /* Invalid report URL: use the existing Cloudflare DOM endpoint. */ }
+  // providerFetch logs the DOM HTTP status once; the analysis claim prevents duplicate calls.
+  const dom=await providerFetch(domUrl,{headers});
   const domReasons=dom.ok?[]:['تعذر قراءة نص الصفحة من تقرير Cloudflare؛ التحليل مبني على العنوان والروابط فقط'];
-  if(!dom.ok)console.warn(`Cloudflare DOM HTTP ${dom.status}; continuing with report-only analysis`);
   const domRaw=dom.ok?(await dom.text()).slice(0,500000):'';
   const text=domRaw.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').slice(0,6000);
   const outgoing=(report.data?.links ?? []).flatMap(l=>{if(!l.href)return [];try{return [cleanUrl(new URL(l.href,finalUrl).href)];}catch{return [];}});
