@@ -246,14 +246,20 @@ export type Database = {
         Row: {
           id: boolean
           last_started_at: string | null
+          max_concurrent: number
+          min_gap_ms: number
         }
         Insert: {
           id?: boolean
           last_started_at?: string | null
+          max_concurrent?: number
+          min_gap_ms?: number
         }
         Update: {
           id?: boolean
           last_started_at?: string | null
+          max_concurrent?: number
+          min_gap_ms?: number
         }
         Relationships: []
       }

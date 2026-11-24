@@ -25,6 +25,13 @@ export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabas
   const claimed=must(await db.rpc('claim_scan',{_link_id:link.id}));if(!claimed)return {started:false,status:'waiting'};
   try {
     const r=await providerFetch(`${cfBase(account)}/scan`,{method:'POST',headers:cfHeaders(token),body:JSON.stringify({url:cleanUrl(link.url),visibility:'Unlisted'})});
+    if(r.status===429) {
+      must(await db.from('links').update({status:'pending',scan_started_at:null,scan_error:null}).eq('id',link.id));
+      // Persist the diagnostic claim so separate server invocations log at most once per link.
+      const logged=requireData(await db.from('engine_cache').upsert({key:`scan-429:${link.id}`,value:{http_status:429},expires_at:new Date(Date.now()+86400000).toISOString()},{onConflict:'key',ignoreDuplicates:true}).select('key'));
+      if(logged.length)console.warn('Cloudflare scan HTTP 429');
+      return {started:false,status:'waiting'};
+    }
     if(!r.ok)throw new Error('رفض Cloudflare بدء الفحص؛ تحقق من صلاحيات URL Scanner والرصيد');
     const json:unknown=await r.json();const env=scanSubmissionSchema.safeParse(json);if(!env.success)throw new Error('لم يصل معرّف فحص صالح من Cloudflare');const uuid=env.data.uuid;
     must(await db.from('links').update({scan_uuid:uuid}).eq('id',link.id));return {started:true,status:'scanning'};

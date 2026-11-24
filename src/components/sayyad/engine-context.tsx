@@ -11,22 +11,60 @@ export function EngineProvider({children}:{children:ReactNode}) {
   const fetch=useServerFn(getWorkspace),google=useServerFn(searchGoogle),maps=useServerFn(searchMaps),scan=useServerFn(scanLink),poll=useServerFn(pollScan),manual=useServerFn(addManualLink);
   const query=useQuery({queryKey:['workspace'],queryFn:()=>fetch(),refetchInterval:5000});
   const [running,setRunning]=useState(false),[progress,setProgress]=useState('جاهز للصيد');
-  const active=useRef(false),cancel=useRef(false),lastStart=useRef(0);
+  const active=useRef(false),cancel=useRef(false);
   useEffect(()=>()=>{cancel.current=true;},[]);
   const wait=async(ms:number,finishCurrent=false)=>{const until=Date.now()+ms;while(Date.now()<until){if(cancel.current&&!finishCurrent)return false;await new Promise(r=>setTimeout(r,Math.min(200,until-Date.now())));}return true;};
   const refresh=async()=>{const r=await query.refetch();if(r.error)throw r.error;return r.data;};
   async function drain(onlyId?:string) {
-    while(!cancel.current){const data=await refresh();const link=data?.links.find(l=>(!onlyId||l.id===onlyId) && ['pending','scanning'].includes(l.status));if(!link)break;
-      setProgress(`فحص ${link.domain}`);
-      if(link.status==='pending'){
-        if(!await wait(Math.max(0,10000-(Date.now()-lastStart.current))))break;
-        const result=await scan({data:{link_id:link.id}});
-        if(!result.started){if(result.status==='waiting'){await wait(1000);continue;}await refresh();continue;}
-        lastStart.current=Date.now();
+    const taken=new Set<string>(),submitted=new Set<string>(),targets=new Set<string>(),completed=new Set<string>();
+    const initial=await refresh();
+    const track=(data:Workspace|undefined)=>{
+      for(const link of data?.links ?? []) {
+        if(onlyId&&link.id!==onlyId)continue;
+        if(['pending','scanning'].includes(link.status))targets.add(link.id);
+        if(targets.has(link.id)&&!['pending','scanning'].includes(link.status))completed.add(link.id);
       }
-      // Stop prevents new work; let the current submitted report finish safely.
-      for(let i=0;i<19;i++){await wait(5000,true);const r=await poll({data:{link_id:link.id}});await refresh();if(r.status!=='scanning')break;}
+      setProgress(`يجري فحص ${submitted.size} روابط — اكتمل ${completed.size} من ${targets.size}`);
+    };
+    track(initial);
+    const errors:unknown[]=[];
+    async function worker() {
+      while(!cancel.current) {
+        const data=await refresh();track(data);
+        // Reservation is synchronous after the refresh: no two workers can take one ID.
+        const link=data?.links.find(l=>(!onlyId||l.id===onlyId)&&!taken.has(l.id)&&['pending','scanning'].includes(l.status));
+        if(!link)return;
+        taken.add(link.id);
+        let waiting=false;
+        try {
+          if(cancel.current)return;
+          if(link.status==='pending') {
+            const result=await scan({data:{link_id:link.id}});
+            if(result.status==='waiting'){waiting=true;continue;}
+            if(!result.started&&result.status!=='scanning'){track(await refresh());continue;}
+          }
+          submitted.add(link.id);track(data);
+          // Stop blocks new submissions, but lets every already-submitted scan finish.
+          const until=Date.now()+95000;
+          while(Date.now()<until) {
+            await wait(3000,true);
+            const result=await poll({data:{link_id:link.id}});
+            track(await refresh());
+            if(result.status!=='scanning')break;
+          }
+        } catch(error) {
+          errors.push(error);
+          track(await refresh());
+        } finally {
+          submitted.delete(link.id);taken.delete(link.id);
+          setProgress(`يجري فحص ${submitted.size} روابط — اكتمل ${completed.size} من ${targets.size}`);
+          if(waiting)await wait(1500);
+        }
+      }
     }
+    const workers=await Promise.allSettled(Array.from({length:onlyId?1:5},()=>worker()));
+    for(const result of workers)if(result.status==='rejected')errors.push(result.reason);
+    if(errors.length)throw errors[0];
   }
   async function run(task:()=>Promise<void>) {if(active.current)return;active.current=true;cancel.current=false;setRunning(true);try{await task();setProgress(cancel.current?'تم إيقاف الصيد بأمان':'اكتمل الصيد');}catch(e){const msg=e instanceof Error?e.message:'تعذر إكمال العملية';setProgress('توقفت العملية؛ تحقق من الإعدادات');toast.error(msg);}finally{active.current=false;setRunning(false);await query.refetch();}}
   const value:Engine={data:query.data,loading:query.isPending,error:query.error?'تعذر تحميل بيانات التحقيق':null,running,progress,
