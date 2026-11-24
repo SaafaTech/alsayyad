@@ -1,17 +1,18 @@
 import { tr, tf } from '@/lib/i18n';
 import { createFileRoute,Link,useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState,useEffect,useMemo } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { Eye,ArrowRight,ShieldCheck,AlertTriangle,FilePlus,ImageOff,ScanLine,ArrowLeft,RefreshCw,Megaphone,Copy } from 'lucide-react';
+import { Eye,ArrowRight,ShieldCheck,AlertTriangle,FilePlus,ImageOff,ScanLine,ArrowLeft,RefreshCw,Megaphone,Copy,History } from 'lucide-react';
 import { Dialog,DialogContent,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { awarenessMessage } from '@/lib/sayyad/campaigns';
 import { reasonPoints,scoreSum } from '@/lib/sayyad/explain';
 import { Button } from '@/components/ui/button';
 import { useEngine } from '@/components/sayyad/engine-context';
-import { meta,removedSignal,needsReview,ProgressCard } from '@/components/sayyad/common';
+import { meta,removedSignal,needsReview,ProgressCard,RiskBadge } from '@/components/sayyad/common';
+import { withoutExpert } from '@/lib/sayyad/campaigns';
 import { isMapsListing } from '@/lib/sayyad/rules';
 import { screenshotProxy,rescanLink } from '@/lib/sayyad/engine.functions';
 import { createEvidence,listEvidence } from '@/lib/sayyad/evidence.functions';
@@ -22,11 +23,12 @@ import { WhoisCard,HostingCard,TakedownButton,asWhois } from '@/components/sayya
 export const Route=createFileRoute('/_authenticated/analysis')({validateSearch:z.object({id:z.string().optional()}),head:()=>meta(tr("التحليل"),tr("تفاصيل أدلة الرصد وتقييم خطورة الروابط وفق التقارير الأمنية غير المباشرة.")),component:Analysis});
 function Analysis(){const {id}=Route.useSearch(),engine=useEngine(),screenshot=useServerFn(screenshotProxy);const link=engine.data?.links.find(l=>l.id===id),a=engine.data?.analyses.find(a=>a.link_id===id),entity=engine.data?.entities.find(e=>e.id===a?.impersonated_entity_id),hunt=engine.data?.hunts.find(h=>h.id===link?.hunt_id);
   const navigate=useNavigate(),create=useServerFn(createEvidence),list=useServerFn(listEvidence),evidence=useQuery({queryKey:['evidence'],queryFn:()=>list()}),existing=evidence.data?.find(e=>e.link_id===id),[creating,setCreating]=useState(false),rescanFn=useServerFn(rescanLink),[rescanning,setRescanning]=useState(false),[rescanned,setRescanned]=useState(false),[msg,setMsg]=useState<string|null>(null);
+  useEffect(()=>{if(id&&link){try{localStorage.setItem('sayyad-last-analysis',id);}catch{}}},[id,link]);
   async function rescan(){if(!id)return;setRescanning(true);try{await rescanFn({data:{link_id:id}});setRescanned(true);void engine.resume();}catch(e){toast.error(e instanceof Error?e.message:tr("تعذرت إعادة الفحص"));}finally{setRescanning(false);}}
   async function openEvidence(){if(existing){await navigate({to:'/evidence',search:{id:existing.id}});return;}setCreating(true);try{const r=await create({data:{link_id:id ?? ''}});await navigate({to:'/evidence',search:{id:r.id}});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر إنشاء ملف الأدلة"));}finally{setCreating(false);}}
   const image=useQuery({queryKey:['scan-screenshot',id,link?.scan_uuid],queryFn:()=>screenshot({data:{link_id:id ?? ''}}),enabled:!!id&&!!link?.scan_uuid&&!!a,staleTime:Infinity,retry:false});
   if(engine.loading)return <div className="empty-state">{tr("جارٍ تحميل التحليل…")}</div>;
-  if(!link)return <div><div className="page-heading"><div><div className="eyebrow"><Eye size={15}/> {tr("قراءة الأدلة")}</div><h1>{tr("التحليل")}</h1></div></div><div className="empty-state analysis-empty"><ScanLine size={40} className="text-primary"/><h3>{tr("اختر رابطاً لعرض التحليل")}</h3><p>{tr("لا يوجد رابط محدد للتحليل.")}</p><Button asChild><Link to="/hunt">{tr("العودة للصيّاد")}<ArrowLeft/></Link></Button></div></div>;
+  if(!link)return <AnalysisQueue/>;
   const incomplete=!a&&['unscannable','error','pending','scanning'].includes(link.status);
   const short=isShortener(link.url.replace(/^[a-z]+:\/\/([^@/]*@)?([^/:?#]+).*$/i,'$2')),chain=typeof (a?.signals as Record<string,unknown>|undefined)?.['redirect_chain']==='string'?String((a?.signals as Record<string,unknown>)['redirect_chain']):null;
   const noSlash=(u:string)=>u.replace(/\/+$/,''),same=!short&&!!link.final_url&&noSlash(link.final_url)===noSlash(link.url);
@@ -52,3 +54,21 @@ function Analysis(){const {id}=Route.useSearch(),engine=useEngine(),screenshot=u
   <details className="tech-panel"><summary>{tr("العرض التقني — ماذا رأى المحرك فعلاً")}</summary><pre>{tech}</pre></details>
   <Dialog open={!!msg} onOpenChange={o=>{if(!o)setMsg(null);}}><DialogContent dir="rtl"><DialogHeader><DialogTitle>{tr("رسالة توعية")}</DialogTitle></DialogHeader><p className="text-sm leading-7 whitespace-pre-wrap">{msg}</p><Button onClick={()=>{void navigator.clipboard.writeText(msg ?? '');toast.success(tr("تم النسخ"));}}><Copy/>{tr("نسخ")}</Button></DialogContent></Dialog></div>;
 }
+
+function AnalysisQueue(){const engine=useEngine();const data=useMemo(()=>engine.data?withoutExpert(engine.data):undefined,[engine.data]);const [lastId,setLastId]=useState<string|null>(null);const [open,setOpen]=useState<Set<string>>(new Set());
+  useEffect(()=>{try{setLastId(localStorage.getItem('sayyad-last-analysis'));}catch{}},[]);
+  type L=NonNullable<typeof data>['links'][number];
+  const byLink=new Map((data?.analyses ?? []).map(a=>[a.link_id,a]));
+  const kind=(l:L)=>{const x=byLink.get(l.id);if(l.status==='official'||l.status==='removed'||removedSignal(x?.signals))return null;if(['pending','scanning'].includes(l.status)&&!x)return null;if(!x||l.status==='unscannable'||l.status==='error')return 'yellow';if(x.level==='red')return 'red';if(x.level==='yellow'||needsReview(x))return 'yellow';return null;};
+  const sorted=[...(data?.links ?? [])].sort((a,b)=>b.first_seen_at.localeCompare(a.first_seen_at));
+  const groups=[{key:'red',title:tr("خطر"),items:sorted.filter(l=>kind(l)==='red')},{key:'yellow',title:tr("تحتاج مراجعة"),items:sorted.filter(l=>kind(l)==='yellow')}];
+  const last=lastId?engine.data?.links.find(l=>l.id===lastId):undefined,lastA=last?byLink.get(last.id) ?? engine.data?.analyses.find(a=>a.link_id===last.id):undefined;
+  const badge=(l:L,a=byLink.get(l.id))=><RiskBadge {...(a?{score:a.score,level:a.level}:{})} status={l.status} removed={removedSignal(a?.signals)} signals={a?.signals}/>;
+  const row=(l:L)=><Link key={l.id} to="/analysis" search={{id:l.id}} className="result-row"><div className="row-risk">{badge(l)}</div><div className="row-main"><div className="flex flex-wrap items-center gap-2"><span dir="ltr" className="domain-label">{l.domain}</span>{isMapsListing(l.url)&&<span className="ad-tag">{tr("خرائط")}</span>}</div>{byLink.get(l.id)?.reasons_ar[0]&&<p className="row-reason">{tr(byLink.get(l.id)!.reasons_ar[0]!)}</p>}</div><div className="row-time"><ArrowLeft size={16} className="row-chev"/></div></Link>;
+  const toggle=(k:string)=>setOpen(s=>{const n=new Set(s);if(n.has(k))n.delete(k);else n.add(k);return n;});
+  const empty=groups.every(g=>!g.items.length);
+  return <div><div className="page-heading"><div><div className="eyebrow"><Eye size={15}/> {tr("قراءة الأدلة")}</div><h1>{tr("التحليل")}</h1></div></div>
+    {engine.loading&&!engine.data?<div className="empty-state">{tr("جارٍ تحميل سجل الرصد…")}</div>:<>
+    {last&&<div className="result-group mb-4"><h3><History size={16} className="text-primary"/>{tr("آخر رابط فتحته")}</h3><div className="results-list"><div className="result-row"><div className="row-risk"><RiskBadge {...(lastA?{score:lastA.score,level:lastA.level}:{})} status={last.status} removed={removedSignal(lastA?.signals)} signals={lastA?.signals}/></div><div className="row-main"><span dir="ltr" className="domain-label">{last.domain}</span></div><Button asChild className="gold-btn"><Link to="/analysis" search={{id:last.id}}>{tr("متابعة ←")}</Link></Button></div></div></div>}
+    {empty?<div className="empty-state analysis-empty"><ScanLine size={40} className="text-primary"/><h3>{tr("لا توجد روابط تحتاج عملاً الآن")}</h3><Button asChild><Link to="/hunt">{tr("العودة للصيّاد")}<ArrowLeft/></Link></Button></div>:groups.filter(g=>g.items.length).map(g=><div key={g.key} className="result-group"><h3><span className={`dot ${g.key}`}/>{g.title} <span className="count-tag">{g.items.length}</span></h3><div className="results-list">{(open.has(g.key)?g.items:g.items.slice(0,3)).map(l=>row(l))}</div>{g.items.length>3&&<button type="button" className="more-btn" onClick={()=>toggle(g.key)}>{open.has(g.key)?tr("عرض أقل"):tf("عرض {0} أخرى ←",g.items.length-3)}</button>}</div>)}</>}
+  </div>;}
