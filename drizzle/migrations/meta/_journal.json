@@ -85,6 +85,13 @@
       "when": 1795527598171,
       "tag": "0011_investigator_access_lockdown",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795535767322,
+      "tag": "0012_phrase_management",
+      "breakpoints": true
     }
   ]
 }

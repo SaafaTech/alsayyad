@@ -8,7 +8,7 @@ import type { Db } from './engine.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
 export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
   const db=context.supabase;
-  const [es,phrases,links,analyses,hunts]=await Promise.all([db.from('entities').select('*').order('name_ar'),db.from('search_phrases').select('*').eq('active',true),db.from('links').select('*').order('first_seen_at',{ascending:false}),db.from('analyses').select('*'),db.from('hunts').select('*').order('created_at',{ascending:false})]);
+  const [es,phrases,links,analyses,hunts]=await Promise.all([db.from('entities').select('*').order('name_ar'),db.from('search_phrases').select('*').order('created_at'),db.from('links').select('*').order('first_seen_at',{ascending:false}),db.from('analyses').select('*'),db.from('hunts').select('*').order('created_at',{ascending:false})]);
   return {entities:requireData(es),phrases:requireData(phrases),links:requireData(links),analyses:requireData(analyses),hunts:requireData(hunts)};
 });
 export const searchGoogle=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'google',key);});

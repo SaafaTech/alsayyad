@@ -578,18 +578,24 @@ export type Database = {
       search_phrases: {
         Row: {
           active: boolean
+          created_at: string
+          created_by: string | null
           entity_id: string | null
           id: string
           phrase: string
         }
         Insert: {
           active?: boolean
+          created_at?: string
+          created_by?: string | null
           entity_id?: string | null
           id?: string
           phrase: string
         }
         Update: {
           active?: boolean
+          created_at?: string
+          created_by?: string | null
           entity_id?: string | null
           id?: string
           phrase?: string
