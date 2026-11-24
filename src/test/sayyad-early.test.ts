@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {ctKeywords,ctDomains,parseWhois,takedownTexts,takedownRecipients,takedownStats,ctEarlyCount,casesCsv,takedownFooter} from '@/lib/sayyad/early';
+import {ctKeywords,ctDomains,parseWhois,takedownTexts,takedownRecipients,takedownStats,ctEarlyCount,casesCsv,takedownFooter,isBasisNote} from '@/lib/sayyad/early';
 import {scoreFinding,neutralAi,type Entity} from '@/lib/sayyad/rules';
 const koala:Entity={id:'00000000-0000-4000-8000-0000000000k1',name_ar:'كوالا',name_en:'Koala',category:'transport',official_domains:['koala.ae'],official_phones:[],brand_keywords:['koala','كوالا','dubai','abc','KoalaPay'],created_at:'2026-11-24T00:00:00Z'};
 const now=Date.parse('2026-11-24T12:00:00Z');
@@ -24,6 +24,39 @@ describe('takedown request',()=>{
   const input={case_no:'SAY-2026-0001',url:'https://koala-pay.example.com/x',final_url:null,platform:'netlify',first_seen_at:'2026-11-24T08:00:00Z',entity:koala,reasons:['سبب'],sha256:'ab12',captured_at:'2026-11-24T08:05:00Z',hosting:{ip:'192.0.2.1',asn:'64500',asnname:'Example Hosting',country:'US'},whois:parseWhois(rdap)};
   it('addresses registrar abuse, hosting ASN and the platform team without inventing URLs',()=>{const r=takedownRecipients(input);expect(r.ar).toEqual(['فريق الإساءة لدى المسجّل Example Registrar LLC: abuse@example.net','مزوّد الاستضافة: Example Hosting (AS64500)','فريق الإبلاغ في Netlify']);});
   it('defangs the URL, shows UTC+4 time and the footer',()=>{const t=takedownTexts(input);expect(t.ar).toContain('hxxps://koala-pay[.]example[.]com/x');expect(t.ar).not.toContain('https://koala-pay');expect(t.ar).toContain('2026-11-24 12:00 (UTC+4)');expect(t.ar).toContain('SAY-2026-0001');expect(t.ar.endsWith(takedownFooter)).toBe(true);expect(t.en).toContain('Screenshot SHA-256: ab12');});
+  it('adds the TDRA in-country blocking section after the evidence, before the thanks',()=>{
+    const t=takedownTexts(input);const ar=t.ar.split('\n'),en=t.en.split('\n');
+    expect(ar).toContain('للحجب داخل الدولة (بالتوازي مع الإزالة من المصدر):');
+    expect(ar.join('\n')).toContain('مزودي الإنترنت المرخصين (e& و du)');
+    expect(en).toContain('In-country blocking (in parallel with removal at the source):');
+    expect(en.join('\n')).toContain('licensed ISPs (e& and du) block the URL inside the UAE');
+    const bi=ar.findIndex(l=>l.startsWith('للحجب داخل الدولة'));
+    expect(bi).toBeGreaterThan(ar.findIndex(l=>l.startsWith('المسجّل:')));
+    expect(ar[bi-1]).toBe('');expect(ar[bi+2]).toBe('');expect(ar[bi+3]).toBe('شاكرين تعاونكم.');
+    const be=en.findIndex(l=>l.startsWith('In-country blocking'));
+    expect(be).toBeGreaterThan(en.findIndex(l=>l.startsWith('Registrar:')));
+    expect(en[be-1]).toBe('');expect(en[be+2]).toBe('');expect(en[be+3]).toBe('Thank you for your cooperation.');
+  });
+  it('never lists TDRA as a recipient',()=>{
+    const t=takedownTexts(input);
+    expect(t.ar.split('\n')[0]).toMatch(/^إلى: /);expect(t.ar.split('\n')[0]).not.toContain('TDRA');
+    expect(t.en.split('\n')[0]).toMatch(/^To: /);expect(t.en.split('\n')[0]).not.toContain('TDRA');
+    expect(t.ar).not.toMatch(/tdra@|\.tdra|tdra\.ae|https?:\/\/[^\s]*tdra/i);
+    expect(t.en).not.toMatch(/tdra@|\.tdra|tdra\.ae|https?:\/\/[^\s]*tdra/i);
+    expect(takedownRecipients(input).ar.join(' ')).not.toContain('TDRA');
+  });
+  it('drops method notes from the reasons list in both texts',()=>{
+    const t=takedownTexts({...input,reasons:['نطاق جديد ظهر في سجلات الشهادات قبل 3 يوم','التحليل مبني على لقطة الشاشة والعنوان','الحكم مبني على تحليل الرابط فقط (الصفحة لم تُفحص)','تعذر قراءة نص الصفحة من تقرير Cloudflare؛ التحليل مبني على العنوان والروابط فقط']});
+    expect(t.ar).toContain('- نطاق جديد ظهر في سجلات الشهادات قبل 3 يوم');
+    expect(t.ar).not.toContain('التحليل مبني على');expect(t.ar).not.toContain('الحكم مبني على تحليل الرابط فقط');
+    expect(t.en).not.toContain('التحليل مبني على');expect(t.en).not.toContain('الحكم مبني على تحليل الرابط فقط');
+    expect(t.ar).toContain('أسباب الاشتباه:');
+  });
+  it('isBasisNote matches only method notes',()=>{
+    expect(isBasisNote('التحليل مبني على لقطة الشاشة والعنوان')).toBe(true);
+    expect(isBasisNote('الحكم مبني على تحليل الرابط فقط (الصفحة لم تُفحص)')).toBe(true);
+    expect(isBasisNote('نطاق جديد ظهر في سجلات الشهادات قبل 3 يوم')).toBe(false);
+  });
 });
 describe('follow-up stats and export',()=>{
   const links=[{id:'a',status:'removed',first_seen_at:'2026-11-24T00:00:00Z',hunt_id:'h1'},{id:'b',status:'removed',first_seen_at:'2026-11-24T00:00:00Z',hunt_id:'h2'},{id:'c',status:'done',first_seen_at:'2026-11-24T00:00:00Z',hunt_id:'h1'}];

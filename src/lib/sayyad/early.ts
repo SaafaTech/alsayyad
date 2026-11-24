@@ -39,6 +39,11 @@ const platformNames:Record<string,string>={wix:'Wix',netlify:'Netlify',linktree:
 export type TakedownInput={case_no:string|null;url:string;final_url:string|null;platform:string;first_seen_at:string;entity:{name_ar:string;name_en:string;official_domains:string[]}|null;reasons:string[];sha256:string|null;captured_at:string|null;hosting:{ip?:string|null;asn?:string|null;asnname?:string|null;country?:string|null}|null;whois:Whois|null};
 const gst=(iso:string|null)=>iso?`${new Date(Date.parse(iso)+4*3600000).toISOString().slice(0,16).replace('T',' ')} (UTC+4)`:'—';
 export const takedownFooter='أُعد آلياً بواسطة الصيّاد للمساعدة — القرار والإرسال للجهة المختصة';
+/** Method notes ("التحليل مبني على…", "الحكم مبني على تحليل الرابط فقط") explain the analysis, they are not evidence: they stay out of the request. */
+export const isBasisNote=(r:string)=>r.includes('التحليل مبني على')||r.includes('الحكم مبني على تحليل الرابط فقط');
+/** In-country blocking path: TDRA has no verified public address here, so the request goes through the competent authority. */
+const blockAr=['للحجب داخل الدولة (بالتوازي مع الإزالة من المصدر):','- يُرفع طلب حجب إلى هيئة تنظيم الاتصالات والحكومة الرقمية (TDRA) عبر الجهة المختصة، لتوجيه مزودي الإنترنت المرخصين (e& و du) بحجب الرابط داخل الإمارات.'];
+const blockEn=['In-country blocking (in parallel with removal at the source):','- A blocking request is submitted to the UAE Telecommunications and Digital Government Regulatory Authority (TDRA) through the competent authority, so licensed ISPs (e& and du) block the URL inside the UAE.'];
 /** Recipients without invented addresses: registrar abuse email, hosting ASN, free-platform abuse team. */
 export function takedownRecipients(t:TakedownInput){
   const ar:string[]=[],en:string[]=[];
@@ -51,15 +56,18 @@ export function takedownTexts(t:TakedownInput){
   const r=takedownRecipients(t),url=defangUrl(t.url),fin=t.final_url&&t.final_url!==t.url?defangUrl(t.final_url):null;
   const ent=t.entity?`${t.entity.name_ar} (${t.entity.official_domains[0] ?? '—'})`:'—',entEn=t.entity?`${t.entity.name_en} (${t.entity.official_domains[0] ?? '—'})`:'—';
   const host=[t.hosting?.ip,t.hosting?.asnname,t.hosting?.country].filter(Boolean).join(' / ')||'—';
+  const rs=t.reasons.filter(x=>!isBasisNote(x));
   const ar=[`إلى: ${r.ar.join('، ')}`,`الموضوع: طلب إيقاف صفحة مشبوهة${t.case_no?` — ${t.case_no}`:''}`,'',
     'السلام عليكم،','نرجو التكرم بمراجعة الرابط التالي وإيقاف النطاق أو الصفحة، لأنه يظهر مؤشرات انتحال لجهة رسمية.','',
     ...(t.case_no?[`رقم القضية: ${t.case_no}`]:[]),`الرابط (معطّل): ${url}`,...(fin?[`الوجهة النهائية: ${fin}`]:[]),`أول رصد: ${gst(t.first_seen_at)}`,`الجهة المنتحَلة: ${ent}`,
-    'أسباب الاشتباه:',...t.reasons.map(x=>`- ${x}`),`بصمة لقطة الشاشة SHA-256: ${t.sha256 ?? '—'}`,`وقت الالتقاط: ${gst(t.captured_at)}`,`الاستضافة / IP: ${host}`,`المسجّل: ${t.whois?.registrar ?? 'غير متاح من السجل'}`,'',
+    'أسباب الاشتباه:',...rs.map(x=>`- ${x}`),`بصمة لقطة الشاشة SHA-256: ${t.sha256 ?? '—'}`,`وقت الالتقاط: ${gst(t.captured_at)}`,`الاستضافة / IP: ${host}`,`المسجّل: ${t.whois?.registrar ?? 'غير متاح من السجل'}`,'',
+    ...blockAr,'',
     'شاكرين تعاونكم.','',takedownFooter].join('\n');
   const en=[`To: ${r.en.join('; ')}`,`Subject: Request to suspend a suspected impersonation page${t.case_no?` — ${t.case_no}`:''}`,'',
     'Hello,','We kindly ask you to review the URL below and suspend the domain or page, as it shows indicators of impersonating an official entity.','',
     ...(t.case_no?[`Case number: ${t.case_no}`]:[]),`URL (defanged): ${url}`,...(fin?[`Final URL: ${fin}`]:[]),`First detected: ${gst(t.first_seen_at)}`,`Impersonated entity: ${entEn}`,
-    `Indicators (Arabic, from the automated analysis):`,...t.reasons.map(x=>`- ${x}`),`Screenshot SHA-256: ${t.sha256 ?? '—'}`,`Captured at: ${gst(t.captured_at)}`,`Hosting / IP: ${host}`,`Registrar: ${t.whois?.registrar ?? 'not available from the registry'}`,'',
+    `Indicators (Arabic, from the automated analysis):`,...rs.map(x=>`- ${x}`),`Screenshot SHA-256: ${t.sha256 ?? '—'}`,`Captured at: ${gst(t.captured_at)}`,`Hosting / IP: ${host}`,`Registrar: ${t.whois?.registrar ?? 'not available from the registry'}`,'',
+    ...blockEn,'',
     'Thank you for your cooperation.','',`${takedownFooter}`,'Prepared automatically by Sayyad to assist — the decision and submission rest with the competent authority.'].join('\n');
   return {ar,en};
 }
