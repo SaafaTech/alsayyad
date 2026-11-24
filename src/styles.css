@@ -144,3 +144,11 @@ html.light .topbar{background:#FFFFFF}html.light .risk.red{color:var(--r-red);ba
 .lang-toggle{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:3px 10px;white-space:nowrap}
 .lang-toggle button{padding:2px 4px;border-radius:4px}
 .lang-toggle button.active{color:var(--primary);font-weight:600}
+
+/* analysis cards: padded cards and label-adjacent values */
+.analysis-columns>.analysis-section,.analysis-columns>section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
+.mini,.ai-box{padding:20px}
+.facts-list>div{grid-template-columns:180px minmax(0,1fr)!important;gap:16px!important;align-items:start}
+.facts-list dd{text-align:start!important;word-break:break-all}
+.facts-list dd[dir=ltr]{text-align:left!important;justify-self:start}
+@media (max-width:640px){.facts-list>div{grid-template-columns:110px minmax(0,1fr)!important;gap:12px!important}.analysis-columns>section{padding:20px}}
