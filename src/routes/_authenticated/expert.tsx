@@ -88,7 +88,7 @@ function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
   const word=(l:string|null)=>l==='red'?tr("خطر"):l==='yellow'?tr("مشبوه"):l==='green'?tr("آمن"):l==='removed'?tr("محذوفة"):l==='failed'?tr("تعذر الفحص"):l==='excluded'?tr("مستبعد"):tr("بالانتظار");
   return <section className="analysis-section mb-6"><h2>{tr("فحص قائمة روابط")}</h2>
     <p className="text-xs text-muted-foreground mb-2">{tr("رابط في كل سطر (يُقبل الشكل المعطّل مثل hxxps://site[.]com)، ويمكن إضافة فاصلة ثم fraud أو legit. الحد 500 رابط.")}</p>
-    <Textarea dir="ltr" rows={6} className="mono text-start" value={text} onChange={e=>setText(e.target.value)} placeholder={'hxxps://example[.]com/pay,fraud\nhttps://example.org,legit'}/>
+    <Textarea dir="ltr" rows={6} className="mono text-start" spellCheck={false} value={text} onChange={e=>setText(e.target.value)} placeholder={'hxxps://example[.]com/pay,fraud\nhttps://example.org,legit'}/>
     <div className="flex items-center gap-3 mt-3"><Button disabled={busy||!lines||lines>500} onClick={()=>void submit()}><ScanLine/>{busy?tr("جارٍ الاستيراد…"):tr("استيراد وفحص")}</Button><span className={`text-xs ${lines>500?'text-destructive':'text-muted-foreground'}`}>{lines} / 500</span></div>
     {latest&&<div className="mt-4"><div className="flex items-center justify-between gap-3 mb-2"><span className="text-sm">{latest} {tr("— اكتمل")} {done} {tr("من")} {total}</span><Button variant="outline" size="sm" disabled={!result.length} onClick={exportCsv}><Upload/>{tr("تصدير CSV")}</Button></div>
       <div className="h-2 rounded bg-muted overflow-hidden mb-3"><div className="h-full bg-primary transition-all" style={{width:`${total?Math.round(done*100/total):0}%`}}/></div>
