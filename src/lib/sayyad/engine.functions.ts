@@ -2,8 +2,8 @@ import { requireInvestigator } from './role.server';
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
-import { linkIdSchema, phraseSchema, cleanUrl, scanSubmissionSchema, officialDestination, hostname } from './rules';
-import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis, scanSubmissionUrl, scanRefusalReason, scanRefusalMessage, ctWatch as ctWatchCore } from './engine.server';
+import { isMapsListing, mapsListingFinding, linkIdSchema, phraseSchema, cleanUrl, scanSubmissionSchema, officialDestination, hostname } from './rules';
+import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis, scanSubmissionUrl, scanRefusalReason, scanRefusalMessage, ctWatch as ctWatchCore, storeMapsListing } from './engine.server';
 import type { Db } from './engine.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
 export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
@@ -25,6 +25,7 @@ export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabas
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const db=context.supabase;const link=requireData(await db.from('links').select('*').eq('id',data.link_id).single());
   if(link.status!=='pending')return {started:false,status:link.status};
+  if(isMapsListing(link.url)){const f=mapsListingFinding({title:link.title,phoneNumber:link.maps_phone},await entities(db));if(f)await storeMapsListing(db,f,link.hunt_id);else must(await db.from('links').update({status:'done'}).eq('id',link.id));return {started:false,status:'done'};}
   const official=officialDestination(hostname(link.url),await entities(db));if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,null,[]);return {started:false,status:'official'};}
   const claimed=must(await db.rpc('claim_scan',{_link_id:link.id}));if(!claimed)return {started:false,status:'waiting'};
   try {

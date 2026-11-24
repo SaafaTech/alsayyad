@@ -258,3 +258,17 @@ export function urlLexicalSignals(url:string,entities:Entity[],originUrl?:string
 
 /** Serper language: "en" when the phrase is mostly Latin letters, otherwise "ar" (gl stays "ae"). */
 export function searchLanguage(phrase:string):'ar'|'en'{const latin=(phrase.match(/[a-z]/gi) ?? []).length,arabic=(phrase.match(/[\u0600-\u06FF]/g) ?? []).length;return latin>arabic?'en':'ar';}
+
+/** Marker URL for a Google Maps place without a website. Never fetched or scanned. */
+export const MAPS_MARKER='https://www.google.com/maps/search/?api=1&query=';
+export const isMapsListing=(url:string)=>url.startsWith(MAPS_MARKER);
+/** A Maps place without a website is stored only when its title names an entity and its phone is not an official one. */
+export function mapsListingFinding(place:{title?:string|null|undefined;phoneNumber?:string|null|undefined},es:Entity[]) {
+  const title=(place.title ?? '').trim(),phone=normalizePhone(place.phoneNumber ?? '');
+  if(!title||!phone)return null;
+  const t=title.toLowerCase(),words=t.split(/[^\p{L}\p{N}]+/u);
+  const e=es.find(x=>[x.name_ar,x.name_en,...x.brand_keywords].filter(k=>k&&!isGenericGeo(k)).some(k=>{const w=k.toLowerCase().trim();return w.length>=4?t.includes(w):words.includes(w);}));
+  if(!e||e.official_phones.some(o=>canonicalPhone(o)===canonicalPhone(phone)))return null;
+  return {entity:e,phone,title,url:MAPS_MARKER+encodeURIComponent(title),analysis:{level:'yellow' as const,score:10,impersonated_entity_id:e.id,signals:{maps_listing:true,phone_mismatch:10,unverified:true},
+    reasons_ar:[`مكان في خرائط Google يحمل اسم ${e.name_ar} برقم غير رسمي: ${phone}`,`الرقم الرسمي: ${e.official_phones.join('، ')||'—'}`,'قائمة خرائط بدون موقع — لم يُفحص أي موقع']}};
+}

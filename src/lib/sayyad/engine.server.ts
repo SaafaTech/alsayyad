@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseWhois, ctDomains, ctTitle } from './early';
 import type { Database, Tables } from '@/integrations/supabase/types';
-import { aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, isRemovedPage, unverifiedFallback, scamTypes, isShortener, neutralAi, searchLanguage, shortenerReason, shortenerUnresolvedReason, type AiFinding, type Entity, type ParentSuspicion } from './rules';
+import { mapsListingFinding, aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, isRemovedPage, unverifiedFallback, scamTypes, isShortener, neutralAi, searchLanguage, shortenerReason, shortenerUnresolvedReason, type AiFinding, type Entity, type ParentSuspicion } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
 export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { const data=must(result);if(data===null||data===undefined)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
@@ -60,12 +60,25 @@ export async function search(db:Db,userId:string,phrase:string,source:'google'|'
   if(!res.ok)throw new Error('تعذر البحث عبر Serper؛ تحقق من الإعدادات والرصيد');
   const result=serperSchema.parse(await res.json());const es=await entities(db);
   const hunt=requireData(await db.from('hunts').insert({phrase,source,created_by:userId}).select('*').single());
-  let count=0;
+  let count=0,noSite=0;
   if(source==='google') {
     for(const [i,item] of (result.organic ?? []).entries()) if(await addLink(db,{url:item.link,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',snippet:item.snippet ?? ''},es))count++;
     for(const [i,item] of (result.ads ?? []).entries()) if(item.link || item.url)if(await addLink(db,{url:item.link ?? item.url ?? '',hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',snippet:item.snippet ?? '',is_ad:true},es))count++;
-  } else for(const [i,item] of (result.places ?? []).entries()) if(item.website)if(await addLink(db,{url:item.website,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',maps_phone:item.phoneNumber?normalizePhone(item.phoneNumber):null},es))count++;
-  must(await db.from('hunts').update({results_count:count}).eq('id',hunt.id));return {hunt_id:hunt.id,results_count:count};
+  } else for(const [i,item] of (result.places ?? []).entries()) {
+    if(item.website){if(await addLink(db,{url:item.website,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',maps_phone:item.phoneNumber?normalizePhone(item.phoneNumber):null},es))count++;continue;}
+    const f=mapsListingFinding(item,es);if(!f){noSite++;continue;}
+    await storeMapsListing(db,f,hunt.id,item.position ?? i+1);count++;
+  }
+  must(await db.from('hunts').update({results_count:count}).eq('id',hunt.id));return {hunt_id:hunt.id,results_count:count,no_site:noSite};
+}
+/** Stores a Maps listing marker (never scanned) and its phone-only verdict. */
+export async function storeMapsListing(db:Db,f:NonNullable<ReturnType<typeof mapsListingFinding>>,huntId:string|null,rank?:number) {
+  const inserted=requireData(await db.from('links').upsert({url:f.url,hunt_id:huntId,...(rank?{rank}:{}),title:f.title,maps_phone:f.phone,domain:'maps.google.com',platform:'other',status:'done'},{onConflict:'url',ignoreDuplicates:true}).select('*'));
+  const link=inserted[0] ?? requireData(await db.from('links').select('*').eq('url',f.url).single());
+  const has=must(await db.from('analyses').select('id').eq('link_id',link.id).maybeSingle());
+  if(!has)must(await db.from('analyses').insert({link_id:link.id,...f.analysis,page_title:f.title,phones_found:[f.phone]}));
+  if(link.status!=='done')must(await db.from('links').update({status:'done',scan_error:null}).eq('id',link.id));
+  return link;
 }
 const rdapSchema=z.object({events:z.array(z.object({eventAction:z.string(),eventDate:z.string()})).optional()});
 export async function domainAge(db:Db,domain:string,platform:string,cacheSecret:string) {
