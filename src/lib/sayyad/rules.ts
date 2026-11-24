@@ -50,8 +50,8 @@ export function uaePhone(p:string) {return /^(971[234679]\d{7}|9715[024568]\d{7}
 export function similarityEntity(url: string, entities: Entity[]) {
   const h=hostname(url), path=decodeURIComponent(new URL(url).pathname).toLowerCase(), target=`${h}${path}`;
   return entities.find(e=>!e.official_domains.some(d=>within(h,d)) && (
-    e.brand_keywords.some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>2 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`));}) ||
-    e.official_domains.some(d=>target.includes(d) || distance(registrationDomain(h),d)<=2 || (d.split('.')[0]?.length ?? 0)>=3 && h.split('.').some(p=>p.includes(d.split('.')[0] ?? '\0')))
+    e.brand_keywords.some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>=4 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`));}) ||
+    e.official_domains.some(d=>target.includes(d) || distance(registrationDomain(h),d)<=2 || (d.split('.')[0]?.length ?? 0)>=4 && h.split('.').some(p=>p.includes(d.split('.')[0] ?? '\0')))
   )) ?? null;
 }
 export function riskLevel(score:number): 'green'|'yellow'|'red' {return score<30?'green':score<60?'yellow':'red';}
@@ -78,4 +78,23 @@ export function chainDestinations(urls:string[],entities:Entity[],depth:number) 
   const domains=new Set<string>();const destinations:string[]=[];
   for(const raw of urls) {try {const url=cleanUrl(raw),domain=hostname(url);if(officialMatch(domain,entities) || domains.has(domain))continue;domains.add(domain);destinations.push(url);if(destinations.length===5)break;}catch{continue;}}
   return destinations;
+}
+const platformAssets:Record<string,string[]>={linktree:['linktr.ee','linktree.com'],wix:['wix.com','wixstatic.com','wixsite.com','wixstudio.com','parastorage.com'],google_sites:['sites.google.com','googleusercontent.com','gstatic.com'],pages_dev:['pages.dev'],netlify:['netlify.app'],vercel:['vercel.app']};
+const socialProfiles=['instagram.com','x.com','twitter.com','facebook.com','youtube.com','tiktok.com','snapchat.com'];
+const contactChannels=['wa.me','api.whatsapp.com','t.me'];
+export function classifyDestinations(domains:string[],pageDomain:string,entities:Entity[]) {
+  const assets=platformAssets[platformFor(pageDomain)] ?? [];
+  const out={official:[] as string[],ignored:[] as string[],unofficial:[] as string[]};
+  for(const raw of new Set(domains.map(d=>d.toLowerCase().replace(/\.$/,'')))) {
+    if(!raw||raw===pageDomain)continue;
+    if(contactChannels.some(c=>within(raw,c)))out.unofficial.push(raw);
+    else if(officialMatch(raw,entities)||raw.endsWith('.gov.ae')||raw.endsWith('.abudhabi')||within(raw,'sharjah.ae')||raw==='apps.apple.com'||raw==='play.google.com')out.official.push(raw);
+    else if(assets.some(a=>within(raw,a))||socialProfiles.some(sp=>within(raw,sp)))out.ignored.push(raw);
+    else out.unofficial.push(raw);
+  }
+  return out;
+}
+export function applyOfficialDestinations<T extends {score:number;level:'green'|'yellow'|'red';reasons_ar:string[];signals:Record<string,number|boolean|string|null>}>(scored:T,destinations:ReturnType<typeof classifyDestinations>,platform:string,ai:AiFinding):T {
+  if(!freePlatform(platform)||destinations.official.length<1||destinations.unofficial.length>0||ai.asks_sensitive_data)return scored;
+  return {...scored,score:0,level:'green',reasons_ar:[`صفحة وسيطة كل روابطها تودي لمواقع رسمية: ${destinations.official.slice(0,4).join('، ')}`],signals:{...scored.signals,official_destinations:true}};
 }

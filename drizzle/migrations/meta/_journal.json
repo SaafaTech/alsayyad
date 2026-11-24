@@ -29,6 +29,13 @@
       "when": 1795504959744,
       "tag": "0003_scan_gap_10s",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795506164913,
+      "tag": "0004_bank_entities",
+      "breakpoints": true
     }
   ]
 }

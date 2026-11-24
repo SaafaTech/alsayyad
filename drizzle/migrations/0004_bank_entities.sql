@@ -1,0 +1,7 @@
+INSERT INTO public.entities (name_ar,name_en,category,official_domains,official_phones,brand_keywords) VALUES
+('بنك أبوظبي التجاري','ADCB','bank',ARRAY['adcb.com'],ARRAY['600502030','971600502030','97126210090'],ARRAY['بنك أبوظبي التجاري','أبوظبي التجاري','abu dhabi commercial bank','adcb']),
+('مصرف أبوظبي الإسلامي','ADIB','bank',ARRAY['adib.ae','adib.com'],ARRAY['600543216','971600543216','97126100600'],ARRAY['مصرف أبوظبي الإسلامي','أبوظبي الإسلامي','abu dhabi islamic bank','adib']),
+('بنك دبي الإسلامي','Dubai Islamic Bank','bank',ARRAY['dib.ae'],ARRAY['046092222','97146092222'],ARRAY['بنك دبي الإسلامي','دبي الإسلامي','dubai islamic bank','dubai islamic','dubaiislamic']),
+('بنك الإمارات دبي الوطني','Emirates NBD','bank',ARRAY['emiratesnbd.com'],ARRAY['600540000','971600540000'],ARRAY['الإمارات دبي الوطني','emirates nbd','enbd']),
+('بنك أبوظبي الأول','First Abu Dhabi Bank (FAB)','bank',ARRAY['bankfab.com'],ARRAY['600525500','971600525500','97126811511'],ARRAY['بنك أبوظبي الأول','first abu dhabi bank','bankfab'])
+ON CONFLICT (name_en) DO UPDATE SET name_ar=EXCLUDED.name_ar,category=EXCLUDED.category,official_domains=EXCLUDED.official_domains,official_phones=EXCLUDED.official_phones,brand_keywords=EXCLUDED.brand_keywords;

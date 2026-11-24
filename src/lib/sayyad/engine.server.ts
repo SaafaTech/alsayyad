@@ -3,7 +3,7 @@ import { generateResponse } from '@lovable.dev/ai-gateway';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Tables } from '@/integrations/supabase/types';
-import { aiSchema, cleanUrl, hostname, officialMatch, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, type Entity } from './rules';
+import { aiSchema, cleanUrl, hostname, officialMatch, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, type Entity } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
 export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { const data=must(result);if(data===null||data===undefined)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
@@ -165,8 +165,10 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
   const outgoingDomains=[...new Set([...outgoing.map(hostname),...(report.lists?.linkDomains ?? [])])].filter(d=>d!==finalDomain);
   const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform,headers['Authorization'] ?? '');
   const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:page.title ?? '',page_text:text,...(!dom.ok?{report_text:[page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000)}:{}),outgoing_domains:outgoingDomains,entities:es});
-  const scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
-  must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...redirect,...domReasons],ai_summary_ar:ai.summary_ar}));
+  const destinations=classifyDestinations(outgoingDomains,finalDomain,es);
+  const base_scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
+  const scored=applyOfficialDestinations(base_scored,destinations,platform,ai);const extra=scored===base_scored?[...redirect,...domReasons]:[];
+  must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...extra],ai_summary_ar:ai.summary_ar}));
   if(['linktree','wix','google_sites'].includes(platform) && link.hunt_id)for(const url of chainDestinations(outgoing.filter(u=>hostname(u)!==finalDomain),es,link.depth)) await addLink(db,{url,hunt_id:link.hunt_id,parent_link_id:link.id,depth:link.depth+1},es);
   must(await db.from('links').update({status:'done'}).eq('id',link.id));
   return {status:'done'} as const;

@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {cleanUrl,officialMatch,scoreFinding,riskLevel,platformFor,chainDestinations,normalizePhone,scanSubmissionSchema,type AiFinding,type Entity} from '@/lib/sayyad/rules';
+import {cleanUrl,officialMatch,scoreFinding,riskLevel,platformFor,chainDestinations,normalizePhone,scanSubmissionSchema,similarityEntity,classifyDestinations,applyOfficialDestinations,type AiFinding,type Entity} from '@/lib/sayyad/rules';
 const salik:Entity={id:'00000000-0000-4000-8000-000000000001',name_ar:'سالك',name_en:'Salik',category:'transport',official_domains:['salik.ae'],official_phones:['80072545','97142335000','97142335005'],brand_keywords:['سالك','salik'],created_at:'2026-11-24T00:00:00Z'};
 const ai:AiFinding={impersonated_entity:null,impersonation_confidence:0,asks_payment_or_card:false,asks_sensitive_data:false,phones_found:[],summary_ar:''};
 const score=(options:Partial<Parameters<typeof scoreFinding>[0]>={})=>scoreFinding({url:'https://merchant.example',entities:[salik],ai,age:null,mapsPhone:null,platform:'other',...options});
@@ -25,4 +25,12 @@ describe('Sayyad investigator rules',()=>{
  it('recognizes free platform subdomains',()=>expect(platformFor('bait.pages.dev')).toBe('pages_dev'));
  it('normalizes contact phone evidence to digits',()=>expect(normalizePhone('+971 (4) 233 5000')).toBe('97142335000'));
  it('rejects local or non-http URL submissions',()=>{expect(()=>cleanUrl('http://127.0.0.1')).toThrow();expect(()=>cleanUrl('file:///tmp/secret')).toThrow();});
+});
+const dib:Entity={...salik,id:'00000000-0000-4000-8000-000000000002',name_ar:'بنك دبي الإسلامي',name_en:'Dubai Islamic Bank',category:'bank',official_domains:['dib.ae'],official_phones:[],brand_keywords:['بنك دبي الإسلامي','دبي الإسلامي','dubai islamic bank','dubai islamic','dubaiislamic']};
+const adcb:Entity={...salik,id:'00000000-0000-4000-8000-000000000003',name_ar:'بنك أبوظبي التجاري',name_en:'ADCB',category:'bank',official_domains:['adcb.com'],official_phones:[],brand_keywords:['abu dhabi commercial bank','adcb']};
+describe('Short tokens and official destinations',()=>{
+ it('does not match dibba-tourism.com to Dubai Islamic Bank',()=>expect(similarityEntity('https://dibba-tourism.com',[dib])).toBeNull());
+ it('matches adcb-update.com to ADCB',()=>expect(similarityEntity('https://adcb-update.com',[adcb])?.name_en).toBe('ADCB'));
+ it('turns a free intermediary page with only official destinations green',()=>{const s=score({url:'https://linktr.ee/shjpolice',platform:'linktree',ai:{...ai,asks_payment_or_card:true}});const d=classifyDestinations(['ds.sharjah.ae','apps.apple.com','instagram.com','linktr.ee'],'linktr.ee',[salik]);expect(d.unofficial).toEqual([]);const r=applyOfficialDestinations(s,d,'linktree',{...ai,asks_payment_or_card:true});expect(r.score).toBe(0);expect(r.level).toBe('green');expect(r.signals['official_destinations']).toBe(true);});
+ it('keeps the score when a Linktree only points to wa.me',()=>{const s=score({url:'https://linktr.ee/salik.ae.online',platform:'linktree'});const d=classifyDestinations(['wa.me'],'linktr.ee',[salik]);expect(d.unofficial).toEqual(['wa.me']);expect(applyOfficialDestinations(s,d,'linktree',ai).score).toBe(s.score);});
 });
