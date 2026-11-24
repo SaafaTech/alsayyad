@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { getWorkspace,searchGoogle,searchMaps,scanLink,pollScan,addManualLink } from '@/lib/sayyad/engine.functions';
+import { getWorkspace,searchGoogle,searchMaps,scanLink,pollScan,addManualLink,ctWatch } from '@/lib/sayyad/engine.functions';
 import { toast } from 'sonner';
+import { ctKeywords } from '@/lib/sayyad/early';
 type Workspace=Awaited<ReturnType<typeof getWorkspace>>;
 export type Job={stage:string;done:number;total:number;active:number;finished:boolean};
 /** Rough remaining seconds: Cloudflare allows one start per ~10 s and each scan takes ~30 s. */
 export const etaSeconds=(remaining:number)=>remaining<=0?0:Math.round(remaining*10+30);
-type Engine={data:Workspace|undefined;loading:boolean;error:string|null;running:boolean;progress:string;job:Job|null;recent:Set<string>;runIds:string[];autoResume:()=>void;runSearch:(phrase:string,source:'google'|'maps')=>Promise<void>;startHunt:()=>Promise<void>;checkLink:(url:string)=>Promise<string|null>;stop:()=>void;resume:()=>Promise<void>};
+type Engine={data:Workspace|undefined;loading:boolean;error:string|null;running:boolean;progress:string;job:Job|null;recent:Set<string>;runIds:string[];autoResume:()=>void;runSearch:(phrase:string,source:'google'|'maps')=>Promise<void>;startHunt:()=>Promise<void>;runCtWatch:()=>Promise<void>;checkLink:(url:string)=>Promise<string|null>;stop:()=>void;resume:()=>Promise<void>};
 type QueueLink={id:string;status:string;parent_link_id:string|null};
 /** Ids in scope for a run: everything, or one link plus every link it queued (and their children). */
 export function scopeIds(links:QueueLink[],onlyId?:string) {
@@ -25,7 +26,7 @@ export function pickNext<T extends QueueLink>(links:T[],taken:Set<string>,onlyId
 const Context=createContext<Engine|null>(null);
 export function useEngine(){const c=useContext(Context);if(!c)throw new Error('Missing investigation context');return c;}
 export function EngineProvider({children}:{children:ReactNode}) {
-  const fetch=useServerFn(getWorkspace),google=useServerFn(searchGoogle),maps=useServerFn(searchMaps),scan=useServerFn(scanLink),poll=useServerFn(pollScan),manual=useServerFn(addManualLink);
+  const fetch=useServerFn(getWorkspace),google=useServerFn(searchGoogle),maps=useServerFn(searchMaps),scan=useServerFn(scanLink),poll=useServerFn(pollScan),manual=useServerFn(addManualLink),ct=useServerFn(ctWatch);
   const query=useQuery({queryKey:['workspace'],queryFn:()=>fetch(),refetchInterval:5000});
   const [running,setRunning]=useState(false),[progress,setProgressText]=useState('جاهز للصيد'),[job,setJob]=useState<Job|null>(null),[recent,setRecent]=useState<Set<string>>(new Set()),[runIds,setRunIds]=useState<string[]>([]);
   const lastTargets=useRef<Set<string>>(new Set()),clearJob=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -104,6 +105,10 @@ export function EngineProvider({children}:{children:ReactNode}) {
   const value:Engine={data:query.data,loading:query.isPending,error:query.error?'تعذر تحميل بيانات التحقيق':null,running,progress,job,recent,runIds,autoResume,
     runSearch:async(phrase,source)=>{if(!phrase.trim())return;await run(async()=>{setProgress(source==='google'?'يبحث في Google…':'يبحث في الخرائط…');const before=query.data;await (source==='google'?google:maps)({data:{phrase}});const after=await refresh();setProgress(`وجد ${found(before,after)} روابط جديدة`);await new Promise(r=>setTimeout(r,800));await drain();});},
     startHunt:async()=>{await run(async()=>{const data=await refresh();const phrases=data?.phrases ?? [];for(const [i,p] of phrases.entries()){if(cancel.current)break;setProgress(`يبحث في Google… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await google({data:{phrase:p.phrase}});await refresh();if(cancel.current)break;setProgress(`يبحث في الخرائط… العبارة ${i+1} من ${phrases.length}: ${p.phrase}`,{done:i,total:phrases.length});await maps({data:{phrase:p.phrase}});await refresh();}if(!cancel.current)await drain();});},
+    runCtWatch:async()=>{await run(async()=>{const data=await refresh();const kws=ctKeywords(data?.entities ?? []);let total=0;const failed:string[]=[];
+      for(const [i,k] of kws.entries()){if(cancel.current)break;setProgress(`يبحث في سجلات الشهادات عن ${k}… (${i+1} من ${kws.length}) وجد ${total} نطاق جديد`,{done:i,total:kws.length});try{total+=(await ct({data:{keyword:k}})).found;}catch{failed.push(k);}}
+      if(failed.length)toast.warning(`تعذر الوصول لسجلات الشهادات لـ: ${failed.join('، ')}`);
+      setProgress(`وجد ${total} نطاق جديد في سجلات الشهادات`);await refresh();await new Promise(r=>setTimeout(r,800));if(!cancel.current)await drain();});},
     checkLink:async(url)=>{if(active.current)return null;try{const link=await manual({data:{url}});await refresh();return link.id;}catch(e){toast.error(e instanceof Error?e.message:'رابط غير صالح');return null;}},
     stop:()=>{cancel.current=true;setProgress('إيقاف… ننتظر اكتمال الفحص الحالي');},resume:async()=>run(()=>drain()),
   };

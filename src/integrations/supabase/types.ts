@@ -32,6 +32,7 @@ export type Database = {
           reasons_ar: string[]
           score: number
           signals: Json
+          whois: Json | null
         }
         Insert: {
           age_source?: string
@@ -50,6 +51,7 @@ export type Database = {
           reasons_ar?: string[]
           score?: number
           signals?: Json
+          whois?: Json | null
         }
         Update: {
           age_source?: string
@@ -68,6 +70,7 @@ export type Database = {
           reasons_ar?: string[]
           score?: number
           signals?: Json
+          whois?: Json | null
         }
         Relationships: [
           {
@@ -469,6 +472,7 @@ export type Database = {
       }
       links: {
         Row: {
+          ct_first_seen: string | null
           depth: number
           domain: string
           final_url: string | null
@@ -490,6 +494,7 @@ export type Database = {
           url: string
         }
         Insert: {
+          ct_first_seen?: string | null
           depth?: number
           domain: string
           final_url?: string | null
@@ -511,6 +516,7 @@ export type Database = {
           url: string
         }
         Update: {
+          ct_first_seen?: string | null
           depth?: number
           domain?: string
           final_url?: string | null

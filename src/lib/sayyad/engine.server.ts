@@ -2,6 +2,7 @@ import { bootstrapSchema, signedBootstrap, verifiedBootstrap } from './registry-
 import { generateResponse } from '@lovable.dev/ai-gateway';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { parseWhois, ctDomains, ctTitle } from './early';
 import type { Database, Tables } from '@/integrations/supabase/types';
 import { aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, isRemovedPage, unverifiedFallback, scamTypes, isShortener, neutralAi, shortenerReason, shortenerUnresolvedReason, type AiFinding, type Entity, type ParentSuspicion } from './rules';
 export type Db = SupabaseClient<Database>;
@@ -39,7 +40,7 @@ export function scanRefusalMessage(body:string,token:string) {
 }
 
 export async function entities(db:Db) {return requireData(await db.from('entities').select('*'));}
-export async function addLink(db:Db,input:{url:string;hunt_id:string;rank?:number;title?:string;snippet?:string;maps_phone?:string|null;is_ad?:boolean;parent_link_id?:string;depth?:number},es:Entity[]) {
+export async function addLink(db:Db,input:{url:string;hunt_id:string;rank?:number;title?:string;snippet?:string;maps_phone?:string|null;is_ad?:boolean;parent_link_id?:string;depth?:number;ct_first_seen?:string},es:Entity[]) {
   let url:string;try{url=cleanUrl(input.url);}catch{return null;}
   const domain=hostname(url),official=officialDestination(domain,es);
   const inserted=requireData(await db.from('links').upsert({...input,url,domain,platform:platformFor(domain),status:official?'official':'pending'},{onConflict:'url',ignoreDuplicates:true}).select('*'));
@@ -68,7 +69,7 @@ export async function search(db:Db,userId:string,phrase:string,source:'google'|'
 }
 const rdapSchema=z.object({events:z.array(z.object({eventAction:z.string(),eventDate:z.string()})).optional()});
 export async function domainAge(db:Db,domain:string,platform:string,cacheSecret:string) {
-  if(freePlatform(platform))return {domain_age_days:null,age_source:'unavailable' as const};
+  if(freePlatform(platform))return {domain_age_days:null,age_source:'unavailable' as const,whois:null};
   domain=registrationDomain(domain);const tld=domain.split('.').at(-1) ?? '';
   const age=(date:string)=>{const time=Date.parse(date);return Number.isFinite(time)&&time<=Date.now()?Math.floor((Date.now()-time)/86400000):null;};
   if(tld!=='ae')try {
@@ -80,10 +81,10 @@ export async function domainAge(db:Db,domain:string,platform:string,cacheSecret:
       if(!json){const r=await providerFetch('https://data.iana.org/rdap/dns.json');if(!r.ok)throw new Error();json=bootstrapSchema.parse(await r.json());const valid=await signedBootstrap(json,cacheSecret);must(await db.from('engine_cache').upsert({key:'iana-rdap',value:valid,expires_at:new Date(Date.now()+86400000).toISOString()}));}
       const bootstrap=bootstrapSchema.parse(json);bases=bootstrap.services.find(([tlds])=>tlds.includes(tld))?.[1].filter(b=>b.startsWith('https://')) ?? [];origins=bases.map(b=>new URL(b).origin);
     }
-    for(const base of bases){const r=await providerFetch(`${base.replace(/\/?$/,'/')}domain/${encodeURIComponent(domain)}`,{},origins);if(!r.ok)continue;const date=rdapSchema.parse(await r.json()).events?.find(e=>e.eventAction==='registration')?.eventDate;if(date && age(date)!==null)return {domain_age_days:age(date),age_source:'rdap' as const};}
+    for(const base of bases){const r=await providerFetch(`${base.replace(/\/?$/,'/')}domain/${encodeURIComponent(domain)}`,{},origins);if(!r.ok)continue;const body:unknown=await r.json();const whois=parseWhois(body);const date=rdapSchema.parse(body).events?.find(e=>e.eventAction==='registration')?.eventDate;if(date && age(date)!==null)return {domain_age_days:age(date),age_source:'rdap' as const,whois};}
   } catch { /* Registry unavailable: fall back only to crt.sh. */ }
-  for(let i=0;i<2;i++)try {const r=await providerFetch(`https://crt.sh/?q=${encodeURIComponent(domain)}&output=json`);if(!r.ok)continue;const records=z.array(z.object({not_before:z.string()})).parse(await r.json());const dates=records.map(r=>r.not_before).filter(d=>age(d)!==null).sort();if(dates[0])return {domain_age_days:age(dates[0]),age_source:'crtsh' as const};}catch{continue;}
-  return {domain_age_days:null,age_source:'unavailable' as const};
+  for(let i=0;i<2;i++)try {const r=await providerFetch(`https://crt.sh/?q=${encodeURIComponent(domain)}&output=json`);if(!r.ok)continue;const records=z.array(z.object({not_before:z.string()})).parse(await r.json());const dates=records.map(r=>r.not_before).filter(d=>age(d)!==null).sort();if(dates[0])return {domain_age_days:age(dates[0]),age_source:'crtsh' as const,whois:null};}catch{continue;}
+  return {domain_age_days:null,age_source:'unavailable' as const,whois:null};
 }
 export async function aiAnalyze(input:{url:string;final_url:string;page_title:string;page_text:string;report_text?:string;outgoing_domains:string[];entities:Entity[];screenshot?:string}) {
   const {screenshot,...evidence}=input;
@@ -160,7 +161,7 @@ export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
     // No evidence at all still gets a verdict from the URL string alone (lexical signals).
     let ai:AiFinding=neutralAi;
     if(hasEvidence)try{ai=await aiAnalyze({url:link.url,final_url:link.url,page_title:link.title ?? '',page_text:link.snippet ?? '',outgoing_domains:[],entities:es});}catch{ai=neutralAi;}
-    const scored=unverifiedFallback(scoreFinding({url:link.url,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[link.title,link.snippet]}));
+    const scored=unverifiedFallback(scoreFinding({url:link.url,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[link.title,link.snippet],ctFirstSeen:link.ct_first_seen}));
     must(await db.from('analyses').upsert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:link.title ?? '',outgoing_domains:[],phones_found:scored.phones,signals:{...scored.signals,asks_payment_or_card:ai.asks_payment_or_card,asks_sensitive_data:ai.asks_sensitive_data},hosting:null,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,hasEvidence?'تعذر فحص الصفحة عبر Cloudflare؛ التقييم مبني على نتيجة البحث وبيانات النطاق فقط':'لم تتوفر نتيجة بحث أو بيانات نطاق؛ التقييم مبني على تحليل الرابط فقط'],ai_summary_ar:ai.summary_ar},{onConflict:'link_id'}));
     must(await db.from('links').update({status:'done',scan_error:link.scan_error===scanRefusalReason?scanRefusalReason:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));
     return {status:'done'} as const;
@@ -213,10 +214,23 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
   const reportText=[page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000);
   const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:page.title ?? '',page_text:text,...(!dom.ok?{report_text:reportText}:{}),outgoing_domains:outgoingDomains,entities:es,...(screenshot?{screenshot}:{})});
   const destinations=classifyDestinations(outgoingDomains,finalDomain,es);
-  const base_scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[page.title,text,reportText,link.title,link.snippet],originUrl:link.url});
+  const base_scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[page.title,text,reportText,link.title,link.snippet],originUrl:link.url,ctFirstSeen:link.ct_first_seen});
   const scored=applyOfficialDestinations(base_scored,destinations,platform,ai);const extra=scored===base_scored?[...redirect,...domReasons]:domReasons;
   must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:{...scored.signals,asks_payment_or_card:ai.asks_payment_or_card,asks_sensitive_data:ai.asks_sensitive_data,...(chain.length>1?{redirect_chain:chain.join(' → ')}:{})},score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...extra],ai_summary_ar:ai.summary_ar,hosting}));
   if(['linktree','wix','google_sites'].includes(platform) && link.hunt_id)for(const url of chainDestinations(outgoing.filter(u=>hostname(u)!==finalDomain),es,link.depth)) await addLink(db,{url,hunt_id:link.hunt_id,parent_link_id:link.id,depth:link.depth+1},es);
   must(await db.from('links').update({status:'done'}).eq('id',link.id));
   return {status:'done'} as const;
+}
+
+/** Early detection: new certificates for a brand keyword in Certificate Transparency (crt.sh), last 14 days, max 40 domains. */
+export async function ctWatch(db:Db,userId:string,keyword:string) {
+  let records:{name_value?:string|undefined;not_before?:string|undefined}[]|null=null;
+  for(let i=0;i<2&&!records;i++)try{const r=await providerFetch(`https://crt.sh/?q=%25${encodeURIComponent(keyword)}%25&output=json`);if(!r.ok)continue;records=z.array(z.object({name_value:z.string().optional(),not_before:z.string().optional()})).parse(await r.json());}catch{continue;}
+  if(!records)throw new Error(`تعذر الوصول إلى سجلات الشهادات لـ ${keyword}`);
+  const es=await entities(db);const found=ctDomains(records,es,Date.now());
+  const hunt=requireData(await db.from('hunts').insert({phrase:`سجلات الشهادات: ${keyword}`,source:'ct',created_by:userId}).select('*').single());
+  let count=0;
+  for(const [i,f] of found.entries()){const link=await addLink(db,{url:`https://${f.domain}/`,hunt_id:hunt.id,rank:i+1,title:ctTitle,ct_first_seen:f.first_seen},es);if(link)count++;}
+  must(await db.from('hunts').update({results_count:count}).eq('id',hunt.id));
+  return {hunt_id:hunt.id,found:count};
 }

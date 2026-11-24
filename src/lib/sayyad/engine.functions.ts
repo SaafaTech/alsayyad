@@ -2,7 +2,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
 import { linkIdSchema, phraseSchema, cleanUrl, scanSubmissionSchema, officialDestination, hostname } from './rules';
-import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis, scanSubmissionUrl, scanRefusalReason, scanRefusalMessage } from './engine.server';
+import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis, scanSubmissionUrl, scanRefusalReason, scanRefusalMessage, ctWatch as ctWatchCore } from './engine.server';
 import type { Db } from './engine.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
 export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
@@ -12,6 +12,7 @@ export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupa
 });
 export const searchGoogle=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'google',key);});
 export const searchMaps=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'maps',key);});
+export const ctWatch=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({keyword:z.string().trim().regex(/^[a-z0-9]{4,40}$/)})).handler(async({data,context})=>ctWatchCore(context.supabase,context.userId,data.keyword));
 export const addManualLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({url:z.string().min(1).max(2048)})).handler(async({data,context})=>{
   const url=cleanUrl(data.url);const db=context.supabase;
   const existing=must(await db.from('links').select('*').eq('url',url).maybeSingle());if(existing)return existing;

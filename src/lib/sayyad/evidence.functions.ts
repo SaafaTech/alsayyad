@@ -9,7 +9,7 @@ import { asksFromReasons, canCreateEvidence, isUrgent, noScreenshotNote, urgentR
 const idSchema=z.object({evidence_id:z.string().uuid()});
 async function sha256(bytes:Uint8Array){const d=await crypto.subtle.digest("SHA-256",bytes as Uint8Array<ArrayBuffer>);return [...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('');}
 export const listEvidence=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>
-  requireData(await context.supabase.from('evidence').select('id,case_no,link_id,created_at,urgent,review_status,case_status,snapshot,screenshot_path').order('created_at',{ascending:false})));
+  requireData(await context.supabase.from('evidence').select('id,case_no,link_id,created_at,urgent,review_status,case_status,snapshot,screenshot_path,screenshot_sha256,captured_at').order('created_at',{ascending:false})));
 export const getEvidence=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).inputValidator(idSchema).handler(async({data,context})=>{
   const db=context.supabase;
   const ev=requireData(await db.from('evidence').select('*').eq('id',data.evidence_id).single());
@@ -38,7 +38,7 @@ export const createEvidence=createServerFn({method:'POST'}).middleware([requireS
   const snapshot:EvidenceSnapshot={
     link:{url:link.url,final_url:link.final_url,domain:link.domain,platform:link.platform,rank:link.rank,is_ad:link.is_ad,title:link.title,snippet:link.snippet,maps_phone:link.maps_phone,status:link.status,scan_error:link.scan_error,first_seen_at:link.first_seen_at,scan_started_at:link.scan_started_at},
     analysis:{score:a.score,level:a.level,reasons_ar:a.reasons_ar,ai_summary_ar:a.ai_summary_ar,domain_age_days:a.domain_age_days,age_source:a.age_source,phones_found:a.phones_found,outgoing_domains:a.outgoing_domains,page_title:a.page_title,created_at:a.created_at,...asksFromReasons(a.reasons_ar,(a.signals ?? {}) as Record<string,unknown>)},
-    hosting,entity:entity?{name_ar:entity.name_ar,name_en:entity.name_en,official_domains:entity.official_domains,official_phones:entity.official_phones}:null,
+    hosting,whois:(a.whois && typeof a.whois==='object' && !Array.isArray(a.whois)?a.whois:null) as import('./early').Whois|null,entity:entity?{name_ar:entity.name_ar,name_en:entity.name_en,official_domains:entity.official_domains,official_phones:entity.official_phones}:null,
     source:{phrase:hunt?.phrase ?? null,source:hunt?.source ?? null,rank:link.rank,is_ad:link.is_ad},
     chain:{parent:parentLink?await node(parentLink):null,children:await Promise.all(childLinks.map(node))},
     page_status:pageStatus,urgent_reason:urgent?urgentReason:null,screenshot_note:bytes?null:noScreenshotNote,

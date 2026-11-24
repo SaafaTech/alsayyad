@@ -115,7 +115,7 @@ export function similarityEntity(url: string, entities: Entity[], opts:{path?:bo
 }
 export function riskLevel(score:number): 'green'|'yellow'|'red' {return score<30?'green':score<60?'yellow':'red';}
 export type ParentSuspicion={entity:Entity;domain:string}|null;
-export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;age:number|null;mapsPhone:string|null;platform:string;parent?:ParentSuspicion;evidenceText?:(string|null|undefined)[];originUrl?:string}) {
+export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;age:number|null;mapsPhone:string|null;platform:string;parent?:ParentSuspicion;evidenceText?:(string|null|undefined)[];originUrl?:string;ctFirstSeen?:string|null;now?:number}) {
   const domain=hostname(input.url);
   const named=input.entities.find(e=>e.name_en===input.ai.impersonated_entity) ?? null;
   const lexical=urlLexicalSignals(input.url,input.entities,input.originUrl);
@@ -140,6 +140,8 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   if(parent) add('inherited_suspicion',30,`مرتبط بصفحة تنتحل ${parent.entity.name_ar}: ${parent.domain}`);
   if(asksPayment || input.ai.asks_sensitive_data) add('sensitive_request',20,input.ai.asks_sensitive_data?'يطلب بيانات حساسة مثل كلمة المرور أو رمز التحقق أو الهوية أو الحساب البنكي':'يطلب الدفع أو بيانات البطاقة المصرفية');
   if(input.age!==null && input.age<90) add('new_domain',15,`النطاق عمره ${input.age} يوم فقط`);
+  // A certificate first seen in CT logs counts as the same new-domain signal, only when the age is unknown (never double counted).
+  if(input.ctFirstSeen&&input.age===null&&signals['new_domain']===undefined){const t=Date.parse(input.ctFirstSeen);if(Number.isFinite(t)){const days=Math.max(0,Math.floor(((input.now ?? Date.now())-t)/86400000));if(days<90)add('new_domain',15,`نطاق جديد ظهر في سجلات الشهادات قبل ${days} يوم`);}}
   const phones=[...new Set([...input.ai.phones_found,...(input.mapsPhone?[input.mapsPhone]:[])].map(normalizePhone))];
   const mismatch=entity ? phones.find(p=>uaePhone(p) && !entity.official_phones.some(o=>canonicalPhone(o)===canonicalPhone(p))) : null;
   if(mismatch && entity) add('phone_mismatch',10,`رقم الهاتف ${mismatch} لا يطابق الأرقام الرسمية لـ${entity.name_ar}: ${entity.official_phones.join('، ') || 'لا توجد أرقام مسجلة'}`);
