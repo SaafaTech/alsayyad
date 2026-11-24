@@ -11,7 +11,13 @@ export const aiSchema = z.object({
   scam_confidence: z.number().min(0).max(1).optional(),
 });
 export const scamTypes=['none','unlicensed_domestic_workers','fund_recovery','fake_insurance','fake_shop_payment','fake_job','fake_investment','fake_real_estate','too_good_price'] as const;
-export const scamReasons:Record<string,string>={unlicensed_domestic_workers:'عرض عمالة منزلية بنمط احتيالي (بدون ترخيص واضح)',fund_recovery:'وعد باسترجاع أموال مسروقة (نمط احتيال معروف)',fake_insurance:'عرض تأمين بنمط احتيالي',fake_shop_payment:'متجر أو رابط دفع بنمط احتيالي',fake_job:'عرض وظيفة بنمط احتيالي',fake_investment:'عرض استثمار بنمط احتيالي',fake_real_estate:'عرض عقاري بنمط احتيالي',too_good_price:'أسعار غير واقعية بنمط احتيالي'};
+const scamPrefix='مؤشرات احتيال محتملة: ';
+export const scamReasons:Record<string,string>={unlicensed_domestic_workers:scamPrefix+'عرض عمالة منزلية بدون ترخيص واضح',fund_recovery:scamPrefix+'وعد باسترجاع أموال مسروقة',fake_insurance:scamPrefix+'عرض تأمين غير موثق',fake_shop_payment:scamPrefix+'متجر أو رابط دفع غير موثق',fake_job:scamPrefix+'عرض وظيفة غير موثق',fake_investment:scamPrefix+'عرض استثمار غير موثق',fake_real_estate:scamPrefix+'عرض عقاري غير موثق',too_good_price:scamPrefix+'أسعار غير واقعية'};
+export const scamThreshold=0.75;
+/** Generic place/country words never identify an entity on their own (housecleaningabudhabi is not TAMM). */
+export const genericGeoWords=['abudhabi','abu-dhabi','dubai','sharjah','ajman','uae','emirates','emirati','alain','rak','fujairah','ummalquwain','gulf','arab'];
+const geoKey=(k:string)=>k.toLowerCase().replace(/[\s\-_]+/g,'');
+export const isGenericGeo=(k:string)=>genericGeoWords.map(geoKey).includes(geoKey(k));
 const riskyTlds=['live','site','online','xyz','shop','top','icu','buzz','click','store','cfd','sbs'];
 const removedHosts=['accounts.google.com','www.wix.com','wix.com','app.netlify.com','www.netlify.com','login.microsoftonline.com'];
 const removedTitles=['page not found','site not found','not found','404',"this site isn't available",'deploy not found','الصفحة غير موجودة'];
@@ -87,12 +93,15 @@ export function nearSpelling(candidate:string,official:string) {
   const label=official.split('.')[0] ?? '';
   return label.length>=6 ? distance(candidate,official)<=2 : distance(candidate,official)<=1 && tld(candidate)===tld(official);
 }
-export function similarityEntity(url: string, entities: Entity[]) {
-  const h=hostname(url), path=decodeURIComponent(new URL(url).pathname).toLowerCase(), target=`${h}${path}`;
+/** Name similarity from the URL. A path counts only on free platforms (the path is the page identity there); on own domains a path mention needs AI confirmation (see scoreFinding). */
+export function similarityEntity(url: string, entities: Entity[], opts:{path?:boolean}={}) {
+  const h=hostname(url), path=decodeURIComponent(new URL(url).pathname).toLowerCase();
+  const usePath=opts.path ?? freePlatform(platformFor(h));
+  const target=usePath?`${h}${path}`:h;
   return entities.find(e=>!e.official_domains.some(d=>within(h,d)) && (
-    e.brand_keywords.some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>=4 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`)) || shortTokenServiceMatch(h,s);}) ||
-    e.official_domains.some(d=>shortTokenServiceMatch(h,d.split('.')[0] ?? '')) ||
-    e.official_domains.some(d=>target.includes(d) || nearSpelling(registrationDomain(h),d) || (d.split('.')[0]?.length ?? 0)>=4 && h.split('.').some(p=>p.includes(d.split('.')[0] ?? '\0')))
+    e.brand_keywords.filter(k=>!isGenericGeo(k)).some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>=4 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`)) || shortTokenServiceMatch(h,s);}) ||
+    e.official_domains.some(d=>{const label=d.split('.')[0] ?? '';return !isGenericGeo(label)&&shortTokenServiceMatch(h,label);}) ||
+    e.official_domains.some(d=>{const label=d.split('.')[0] ?? '';return target.includes(d) || nearSpelling(registrationDomain(h),d) || (!isGenericGeo(label)&&label.length>=4 && h.split('.').some(p=>p.includes(label)));})
   )) ?? null;
 }
 export function riskLevel(score:number): 'green'|'yellow'|'red' {return score<30?'green':score<60?'yellow':'red';}
@@ -100,7 +109,10 @@ export type ParentSuspicion={entity:Entity;domain:string}|null;
 export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;age:number|null;mapsPhone:string|null;platform:string;parent?:ParentSuspicion;evidenceText?:(string|null|undefined)[]}) {
   const domain=hostname(input.url);
   const named=input.entities.find(e=>e.name_en===input.ai.impersonated_entity) ?? null;
-  const similar=similarityEntity(input.url,input.entities);
+  const pathOnly=similarityEntity(input.url,input.entities,{path:true});
+  const hostSimilar=similarityEntity(input.url,input.entities);
+  // Mentions outside the domain count only when the AI confirms impersonation of that same entity.
+  const similar=hostSimilar ?? (pathOnly&&named?.id===pathOnly.id&&input.ai.impersonation_confidence>=0.6?pathOnly:null);
   const parent=input.parent && !officialDestination(domain,input.entities) ? input.parent : null;
   const entity=named ?? similar ?? parent?.entity ?? null;
   const asksPayment=input.ai.asks_payment_or_card || mentionsPayment(input.evidenceText ?? []);
@@ -115,7 +127,7 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   const mismatch=entity ? phones.find(p=>uaePhone(p) && !entity.official_phones.some(o=>canonicalPhone(o)===canonicalPhone(p))) : null;
   if(mismatch && entity) add('phone_mismatch',10,`رقم الهاتف ${mismatch} لا يطابق الأرقام الرسمية لـ${entity.name_ar}: ${entity.official_phones.join('، ') || 'لا توجد أرقام مسجلة'}`);
   const scam=input.ai.scam_type ?? 'none',scamConf=input.ai.scam_confidence ?? 0;
-  if(scam!=='none'&&scamConf>=0.6) add('scam_pattern',30,scamReasons[scam] ?? 'نمط احتيال معروف');
+  if(scam!=='none'&&scamConf>=scamThreshold) add('scam_pattern',30,scamReasons[scam] ?? 'نمط احتيال معروف');
   const suffix=getPublicSuffix(domain,{allowPrivateDomains:false}) ?? '';
   if(!freePlatform(input.platform)&&riskyTlds.includes(suffix)) add('risky_tld',10,`امتداد نطاق شائع في الاحتيال (.${suffix})`);
   if(freePlatform(input.platform)) add('free_platform',10,`الموقع مستضاف على منصة مجانية: ${input.platform}`);

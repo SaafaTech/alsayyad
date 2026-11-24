@@ -6,7 +6,7 @@ import { Network,RefreshCw,Megaphone,Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog,DialogContent,DialogHeader,DialogTitle } from '@/components/ui/dialog';
-import { meta } from '@/components/sayyad/common';
+import { meta, ProgressCard } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { listCampaigns,rebuildCampaigns } from '@/lib/sayyad/campaigns.functions';
 import { listEvidence } from '@/lib/sayyad/evidence.functions';
@@ -19,7 +19,7 @@ function Campaigns(){
   const [busy,setBusy]=useState(false),[msg,setMsg]=useState<string|null>(null);
   async function regroup(){setBusy(true);try{const r=await rebuild();toast.success(`تم التجميع: ${r.count} حملة`);await qc.invalidateQueries({queryKey:['campaigns']});}catch(e){toast.error(e instanceof Error?e.message:'تعذر التجميع');}finally{setBusy(false);}}
   const links=new Map((engine.data?.links ?? []).map(l=>[l.id,l]));
-  return <div><div className="page-heading"><div><div className="eyebrow"><Network size={14}/> ربط الأدلة</div><h1>الحملات</h1><p>روابط خطرة مترابطة بقواعد ثابتة (سلسلة، هاتف، استضافة، قالب، نمط اسم) — بدون ذكاء اصطناعي.</p></div><Button variant="outline" disabled={busy} onClick={()=>void regroup()}><RefreshCw/>{busy?'جارٍ التجميع…':'إعادة التجميع'}</Button></div>
+  return <div><div className="page-heading"><div><div className="eyebrow"><Network size={14}/> ربط الأدلة</div><h1>الحملات</h1><p>روابط خطرة مترابطة بقواعد ثابتة (سلسلة، هاتف، استضافة، قالب، نمط اسم) — بدون ذكاء اصطناعي.</p></div><Button variant="outline" disabled={busy} onClick={()=>void regroup()}><RefreshCw/>إعادة التجميع</Button></div>{busy&&<div className="mb-6"><ProgressCard job={{stage:'يعيد تجميع الحملات من الروابط الخطرة…'}} running/></div>}
     {q.isPending?<div className="empty-state">جارٍ تحميل الحملات…</div>:!q.data?.campaigns.length?<div className="empty-state">لا توجد حملات بعد — تحتاج رابطين خطرين مترابطين على الأقل</div>:
     <div className="grid gap-4 lg:grid-cols-2">{q.data.campaigns.map(c=>{
       const members=q.data.links.filter(m=>m.campaign_id===c.id).map(m=>links.get(m.link_id)).filter(l=>!!l);
