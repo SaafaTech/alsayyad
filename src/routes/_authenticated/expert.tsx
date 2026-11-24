@@ -13,7 +13,10 @@ import { meta, ProgressCard } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { supabase } from '@/integrations/supabase/client';
 import { parsePasted,resultsCsv,importCsv,patternStats,accuracy,sample,expertLevel,expectedMatrix } from '@/lib/sayyad/expert';
-import { defangUrl,defangDomain,expertNetworks } from '@/lib/sayyad/campaigns';
+import { defangUrl,defangDomain,expertNetworks,awarenessMessage } from '@/lib/sayyad/campaigns';
+import { CampaignCard,AwarenessDialog,type CampaignNode,type CampaignSig } from '@/components/sayyad/campaign-view';
+import { listEvidence } from '@/lib/sayyad/evidence.functions';
+import { removedSignal } from '@/components/sayyad/common';
 import { Link } from '@tanstack/react-router';
 import { scanExpertSample } from '@/lib/sayyad/expert.functions';
 import { rescanLink } from '@/lib/sayyad/engine.functions';
@@ -142,19 +145,20 @@ function usePasteBatch(rows:Row[],level:(id:string)=>string|null){
 }
 
 function Networks(){
-  const engine=useEngine();const d=engine.data;
+  const engine=useEngine();const d=engine.data;const ev=useServerFn(listEvidence);const evidence=useQuery({queryKey:['evidence'],queryFn:()=>ev()});const [msg,setMsg]=useState<string|null>(null);
   const nets=useMemo(()=>d?expertNetworks({hunts:d.hunts,links:d.links,analyses:d.analyses,entities:d.entities}):[],[d]);
   return <section className="mb-5">
     <h4 className="font-semibold">{tr("شبكات مرتبطة في بياناتك")}</h4>
     <p className="x-hint mb-2">{tr("من بيانات المختص — ليست من صيد الصيّاد")}</p>
     {!nets.length?<p className="text-sm text-muted-foreground">{tr("لا توجد شبكات مرتبطة بعد")}</p>:
-    <div className="grid gap-3">{nets.map((n,i)=>{const ent=d?.entities.find(e=>e.id===n.entity_id);
-      const ips=[...new Set(n.links.map(m=>((d?.analyses.find(a=>a.link_id===m.link_id)?.hosting ?? {}) as {ip?:string|null}).ip).filter((x):x is string=>!!x))];
-      return <div key={i} className="rounded-lg border p-3">
-        <div className="flex flex-wrap items-center gap-2 mb-2"><b>{ent?ent.name_ar:tr("حملة غير مصنفة")}</b><span className="text-xs text-muted-foreground">{tf("{0} مواقع",n.link_count)}</span>
-          {n.signals.reasons_ar.map(r=><span key={r} className="rounded-full border px-2 py-0.5 text-xs">{tr(r)}</span>)}
-          {ips.length===1&&<span className="text-xs text-muted-foreground">IP: <span dir="ltr" className="font-mono">{ips[0]}</span></span>}</div>
-        <ul className="grid gap-1">{n.links.map(m=>{const l=d?.links.find(x=>x.id===m.link_id);return l&&<li key={m.link_id}><Link to="/analysis" search={{id:m.link_id}} dir="ltr" className="font-mono text-sm text-primary hover:underline">{defangDomain(l.domain)}</Link></li>;})}</ul>
-      </div>;})}</div>}
+    nets.map((n,i)=>{const ent=d?.entities.find(e=>e.id===n.entity_id);const sig=n.signals as CampaignSig;
+      const members=n.links.map(m=>d?.links.find(x=>x.id===m.link_id)).filter((l):l is NonNullable<typeof l>=>!!l);
+      const ana=(id:string)=>d?.analyses.find(a=>a.link_id===id);
+      const ips=[...new Set(members.map(l=>((ana(l.id)?.hosting ?? {}) as {ip?:string|null}).ip ?? null))];
+      const ip=ips.length===1?ips[0] ?? null:null;
+      const nodes:CampaignNode[]=members.map(l=>{const a=ana(l.id),m=sig.members?.[l.id],removed=!!m?.removed||l.status==='removed'||removedSignal(a?.signals);return {id:l.id,domain:l.domain,removed,score:a?.score ?? m?.score ?? null,oldScore:m?.old_score ?? null,caseNo:evidence.data?.find(e=>e.link_id===l.id)?.case_no ?? null};});
+      const files=(evidence.data ?? []).filter(e=>members.some(l=>l.id===e.link_id));
+      return <CampaignCard key={i} title={ent?tf("شبكة انتحال {0}",tr(ent.name_ar)):tr("شبكة غير مصنفة")} badge={tr("من بيانات المختص — ليست من صيد الصيّاد")} entity={ent} nodes={nodes} sig={sig} linkCount={n.link_count} ip={ip} files={files} onAwareness={()=>setMsg(awarenessMessage(ent,members.map(l=>l.domain)))}/>;})}
+    <AwarenessDialog msg={msg} onClose={()=>setMsg(null)}/>
   </section>;
 }
