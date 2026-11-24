@@ -35,3 +35,4 @@ use the editor.
 - Store only derived investigation evidence, not raw DOM or screenshots; screenshots are retrieved through an authenticated Cloudflare-only proxy.
 - Keep signed-in screens under the pathless authenticated layout and check authentication on every server function; route access is not the RPC security boundary.
 - Authenticate the cached IANA RDAP bootstrap with a server-only HMAC before allowing registry origins; database edits must never broaden the outbound allowlist, and provider redirects are never followed.
+- Evidence files are created only by a server function using service privileges after the caller's session proves the link is yellow/red; they freeze a snapshot and the original Cloudflare screenshot bytes (private bucket, SHA-256), and custody_log is insert-only so later rescans or edits never change a file.

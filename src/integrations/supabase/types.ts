@@ -21,6 +21,7 @@ export type Database = {
           cf_scan_uuid: string | null
           created_at: string
           domain_age_days: number | null
+          hosting: Json | null
           id: string
           impersonated_entity_id: string | null
           level: string
@@ -38,6 +39,7 @@ export type Database = {
           cf_scan_uuid?: string | null
           created_at?: string
           domain_age_days?: number | null
+          hosting?: Json | null
           id?: string
           impersonated_entity_id?: string | null
           level?: string
@@ -55,6 +57,7 @@ export type Database = {
           cf_scan_uuid?: string | null
           created_at?: string
           domain_age_days?: number | null
+          hosting?: Json | null
           id?: string
           impersonated_entity_id?: string | null
           level?: string
@@ -79,6 +82,41 @@ export type Database = {
             columns: ["link_id"]
             isOneToOne: true
             referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custody_log: {
+        Row: {
+          action: string
+          actor: string | null
+          at: string
+          detail: string | null
+          evidence_id: string
+          id: string
+        }
+        Insert: {
+          action: string
+          actor?: string | null
+          at?: string
+          detail?: string | null
+          evidence_id: string
+          id?: string
+        }
+        Update: {
+          action?: string
+          actor?: string | null
+          at?: string
+          detail?: string | null
+          evidence_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custody_log_evidence_id_fkey"
+            columns: ["evidence_id"]
+            isOneToOne: false
+            referencedRelation: "evidence"
             referencedColumns: ["id"]
           },
         ]
@@ -133,6 +171,68 @@ export type Database = {
           official_phones?: string[]
         }
         Relationships: []
+      }
+      evidence: {
+        Row: {
+          captured_at: string | null
+          case_no: string
+          case_status: string
+          created_at: string
+          created_by: string | null
+          id: string
+          investigator_notes: Json
+          link_id: string
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          screenshot_path: string | null
+          screenshot_sha256: string | null
+          snapshot: Json
+          urgent: boolean
+        }
+        Insert: {
+          captured_at?: string | null
+          case_no?: string
+          case_status?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          investigator_notes?: Json
+          link_id: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          screenshot_path?: string | null
+          screenshot_sha256?: string | null
+          snapshot?: Json
+          urgent?: boolean
+        }
+        Update: {
+          captured_at?: string | null
+          case_no?: string
+          case_status?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          investigator_notes?: Json
+          link_id?: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          screenshot_path?: string | null
+          screenshot_sha256?: string | null
+          snapshot?: Json
+          urgent?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "evidence_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: true
+            referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       hunts: {
         Row: {
