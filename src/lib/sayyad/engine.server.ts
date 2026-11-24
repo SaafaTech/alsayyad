@@ -3,7 +3,7 @@ import { generateResponse } from '@lovable.dev/ai-gateway';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Tables } from '@/integrations/supabase/types';
-import { aiSchema, cleanUrl, hostname, officialMatch, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, type Entity } from './rules';
+import { aiSchema, cleanUrl, hostname, officialMatch, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, type Entity, type ParentSuspicion } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
 export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { const data=must(result);if(data===null||data===undefined)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
@@ -40,7 +40,7 @@ export function scanRefusalMessage(body:string,token:string) {
 export async function entities(db:Db) {return requireData(await db.from('entities').select('*'));}
 export async function addLink(db:Db,input:{url:string;hunt_id:string;rank?:number;title?:string;snippet?:string;maps_phone?:string|null;is_ad?:boolean;parent_link_id?:string;depth?:number},es:Entity[]) {
   let url:string;try{url=cleanUrl(input.url);}catch{return null;}
-  const domain=hostname(url),official=officialMatch(domain,es);
+  const domain=hostname(url),official=officialDestination(domain,es);
   const inserted=requireData(await db.from('links').upsert({...input,url,domain,platform:platformFor(domain),status:official?'official':'pending'},{onConflict:'url',ignoreDuplicates:true}).select('*'));
   const link=inserted[0] ?? requireData(await db.from('links').select('*').eq('url',url).single());
   // Merge source facts into the existing URL without ever re-scanning it.
@@ -120,6 +120,14 @@ export function reportState(report:ReturnType<typeof parseReport>,startedAt:stri
   if(!finished)return Number.isFinite(started)&&now-started<90000?'scanning':'unscannable';
   return report.task?.success===false||!report.page?.url?'unscannable':'finished';
 }
+async function parentSuspicion(db:Db,link:Tables<'links'>,es:Entity[]):Promise<ParentSuspicion> {
+  if(!link.parent_link_id)return null;
+  const {data}=await db.from('analyses').select('level,impersonated_entity_id').eq('link_id',link.parent_link_id).maybeSingle();
+  if(data?.level!=='red'||!data.impersonated_entity_id)return null;
+  const entity=es.find(e=>e.id===data.impersonated_entity_id);
+  const {data:parent}=await db.from('links').select('domain,final_url,url').eq('id',link.parent_link_id).maybeSingle();
+  return entity&&parent?{entity,domain:parent.domain ?? hostname(parent.final_url ?? parent.url)}:null;
+}
 export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
   const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));
   if(!claimed){const current=requireData(await db.from('links').select('status').eq('id',link.id).single());return {status:current.status};}
@@ -130,7 +138,7 @@ export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
     const age=await domainAge(db,domain,platform,`Bearer ${process.env['CLOUDFLARE_API_TOKEN'] ?? ''}`);
     if(!link.title?.trim()&&!link.snippet?.trim()&&!link.maps_phone&&age.domain_age_days===null)throw new Error('لا تتوفر أدلة بحث أو بيانات نطاق كافية لإجراء تقييم موثوق');
     const ai=await aiAnalyze({url:link.url,final_url:link.url,page_title:link.title ?? '',page_text:link.snippet ?? '',outgoing_domains:[],entities:es});
-    const scored=scoreFinding({url:link.url,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
+    const scored=scoreFinding({url:link.url,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[link.title,link.snippet]});
     must(await db.from('analyses').upsert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:link.title ?? '',outgoing_domains:[],phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,'تعذر فحص الصفحة عبر Cloudflare؛ التقييم مبني على نتيجة البحث وبيانات النطاق فقط'],ai_summary_ar:ai.summary_ar},{onConflict:'link_id'}));
     must(await db.from('links').update({status:'done',scan_error:link.scan_error===scanRefusalReason?scanRefusalReason:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));
     return {status:'done'} as const;
@@ -164,10 +172,11 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
   const outgoing=(report.data?.links ?? []).flatMap(l=>{if(!l.href)return [];try{return [cleanUrl(new URL(l.href,finalUrl).href)];}catch{return [];}});
   const outgoingDomains=[...new Set([...outgoing.map(hostname),...(report.lists?.linkDomains ?? [])])].filter(d=>d!==finalDomain);
   const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform,headers['Authorization'] ?? '');
-  const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:page.title ?? '',page_text:text,...(!dom.ok?{report_text:[page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000)}:{}),outgoing_domains:outgoingDomains,entities:es});
+  const reportText=[page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000);
+  const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:page.title ?? '',page_text:text,...(!dom.ok?{report_text:reportText}:{}),outgoing_domains:outgoingDomains,entities:es});
   const destinations=classifyDestinations(outgoingDomains,finalDomain,es);
-  const base_scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
-  const scored=applyOfficialDestinations(base_scored,destinations,platform,ai);const extra=scored===base_scored?[...redirect,...domReasons]:[];
+  const base_scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[page.title,text,reportText,link.title,link.snippet]});
+  const scored=applyOfficialDestinations(base_scored,destinations,platform,ai);const extra=scored===base_scored?[...redirect,...domReasons]:domReasons;
   must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...extra],ai_summary_ar:ai.summary_ar}));
   if(['linktree','wix','google_sites'].includes(platform) && link.hunt_id)for(const url of chainDestinations(outgoing.filter(u=>hostname(u)!==finalDomain),es,link.depth)) await addLink(db,{url,hunt_id:link.hunt_id,parent_link_id:link.id,depth:link.depth+1},es);
   must(await db.from('links').update({status:'done'}).eq('id',link.id));

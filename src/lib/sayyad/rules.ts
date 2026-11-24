@@ -35,6 +35,20 @@ export function officialMatch(domain: string, entities: Entity[]) {
   if(neutral.some(d=>within(domain,d))) return {entity:null, reason:'موقع معروف'};
   return null;
 }
+export function officialDestination(domain: string, entities: Entity[]) {
+  const d=domain.toLowerCase().replace(/\.$/,'');
+  const match=officialMatch(d,entities);
+  if(match)return match;
+  if(d.endsWith('.gov.ae')||d.endsWith('.abudhabi')||within(d,'sharjah.ae')||d==='apps.apple.com'||d==='play.google.com')return {entity:null, reason:'وجهة رسمية معروفة'};
+  return null;
+}
+const serviceWords=['serv','pay','online','fine','portal','login','update','verify','renew','card','topup','recharge','gov','uae','ae'];
+export const shortTokenServiceMatch=(host:string,token:string)=>token.length>0&&token.length<=3&&host.split('.').some(label=>label.startsWith(token)&&serviceWords.some(w=>label.slice(token.length).replace(/[-_]/g,'').startsWith(w)));
+const paymentWords=['دفع','سداد','تسديد','مخالفات','غرامة','رسوم','تعبئة رصيد','شحن رصيد','pay','payment','fine','top up','recharge'];
+export function mentionsPayment(texts:(string|null|undefined)[]) {
+  const t=texts.filter(Boolean).join(' ').toLowerCase().replace(/\s+/g,' ');
+  return paymentWords.some(w=>/^[a-z ]+$/.test(w)?new RegExp(`(^|[^a-z])${w}`).test(t):t.includes(w));
+}
 export function platformFor(domain: string) {
   const platforms: [string,string][]=[['linktr.ee','linktree'],['wixsite.com','wix'],['wix.com','wix'],['sites.google.com','google_sites'],['pages.dev','pages_dev'],['netlify.app','netlify'],['vercel.app','vercel'],['instagram.com','instagram']];
   return platforms.find(([d])=>within(domain,d))?.[1] ?? 'other';
@@ -50,21 +64,26 @@ export function uaePhone(p:string) {return /^(971[234679]\d{7}|9715[024568]\d{7}
 export function similarityEntity(url: string, entities: Entity[]) {
   const h=hostname(url), path=decodeURIComponent(new URL(url).pathname).toLowerCase(), target=`${h}${path}`;
   return entities.find(e=>!e.official_domains.some(d=>within(h,d)) && (
-    e.brand_keywords.some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>=4 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`));}) ||
+    e.brand_keywords.some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>=4 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`)) || shortTokenServiceMatch(h,s);}) ||
+    e.official_domains.some(d=>shortTokenServiceMatch(h,d.split('.')[0] ?? '')) ||
     e.official_domains.some(d=>target.includes(d) || distance(registrationDomain(h),d)<=2 || (d.split('.')[0]?.length ?? 0)>=4 && h.split('.').some(p=>p.includes(d.split('.')[0] ?? '\0')))
   )) ?? null;
 }
 export function riskLevel(score:number): 'green'|'yellow'|'red' {return score<30?'green':score<60?'yellow':'red';}
-export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;age:number|null;mapsPhone:string|null;platform:string}) {
+export type ParentSuspicion={entity:Entity;domain:string}|null;
+export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;age:number|null;mapsPhone:string|null;platform:string;parent?:ParentSuspicion;evidenceText?:(string|null|undefined)[]}) {
   const domain=hostname(input.url);
   const named=input.entities.find(e=>e.name_en===input.ai.impersonated_entity) ?? null;
   const similar=similarityEntity(input.url,input.entities);
-  const entity=named ?? similar;
+  const parent=input.parent && !officialDestination(domain,input.entities) ? input.parent : null;
+  const entity=named ?? similar ?? parent?.entity ?? null;
+  const asksPayment=input.ai.asks_payment_or_card || mentionsPayment(input.evidenceText ?? []);
   const reasons:string[]=[];const signals:Record<string,number|boolean|string|null>={};let score=0;
   const add=(key:string,points:number,reason:string)=>{signals[key]=points;score+=points;reasons.push(reason);};
   if(named && input.ai.impersonation_confidence>=0.6 && !named.official_domains.some(d=>within(domain,d))) add('impersonation',35,`ينتحل هوية ${named.name_ar} بثقة ${Math.round(input.ai.impersonation_confidence*100)}٪ على نطاق غير رسمي`);
   if(similar) add('similarity',30,`يحمل اسم ${similar.name_ar} على نطاق غير رسمي: ${domain}`);
-  if(input.ai.asks_payment_or_card || input.ai.asks_sensitive_data) add('sensitive_request',20,input.ai.asks_sensitive_data?'يطلب بيانات حساسة مثل كلمة المرور أو رمز التحقق أو الهوية أو الحساب البنكي':'يطلب الدفع أو بيانات البطاقة المصرفية');
+  if(parent) add('inherited_suspicion',30,`مرتبط بصفحة تنتحل ${parent.entity.name_ar}: ${parent.domain}`);
+  if(asksPayment || input.ai.asks_sensitive_data) add('sensitive_request',20,input.ai.asks_sensitive_data?'يطلب بيانات حساسة مثل كلمة المرور أو رمز التحقق أو الهوية أو الحساب البنكي':'يطلب الدفع أو بيانات البطاقة المصرفية');
   if(input.age!==null && input.age<90) add('new_domain',15,`النطاق عمره ${input.age} يوم فقط`);
   const phones=[...new Set([...input.ai.phones_found,...(input.mapsPhone?[input.mapsPhone]:[])].map(normalizePhone))];
   const mismatch=entity ? phones.find(p=>uaePhone(p) && !entity.official_phones.some(o=>canonicalPhone(o)===canonicalPhone(p))) : null;
@@ -76,7 +95,7 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
 export function chainDestinations(urls:string[],entities:Entity[],depth:number) {
   if(depth>=2)return [];
   const domains=new Set<string>();const destinations:string[]=[];
-  for(const raw of urls) {try {const url=cleanUrl(raw),domain=hostname(url);if(officialMatch(domain,entities) || domains.has(domain))continue;domains.add(domain);destinations.push(url);if(destinations.length===5)break;}catch{continue;}}
+  for(const raw of urls) {try {const url=cleanUrl(raw),domain=hostname(url);if(officialDestination(domain,entities) || domains.has(domain))continue;domains.add(domain);destinations.push(url);if(destinations.length===5)break;}catch{continue;}}
   return destinations;
 }
 const platformAssets:Record<string,string[]>={linktree:['linktr.ee','linktree.com'],wix:['wix.com','wixstatic.com','wixsite.com','wixstudio.com','parastorage.com'],google_sites:['sites.google.com','googleusercontent.com','gstatic.com'],pages_dev:['pages.dev'],netlify:['netlify.app'],vercel:['vercel.app']};
@@ -88,7 +107,7 @@ export function classifyDestinations(domains:string[],pageDomain:string,entities
   for(const raw of new Set(domains.map(d=>d.toLowerCase().replace(/\.$/,'')))) {
     if(!raw||raw===pageDomain)continue;
     if(contactChannels.some(c=>within(raw,c)))out.unofficial.push(raw);
-    else if(officialMatch(raw,entities)||raw.endsWith('.gov.ae')||raw.endsWith('.abudhabi')||within(raw,'sharjah.ae')||raw==='apps.apple.com'||raw==='play.google.com')out.official.push(raw);
+    else if(officialDestination(raw,entities))out.official.push(raw);
     else if(assets.some(a=>within(raw,a))||socialProfiles.some(sp=>within(raw,sp)))out.ignored.push(raw);
     else out.unofficial.push(raw);
   }
