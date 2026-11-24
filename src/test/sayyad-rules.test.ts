@@ -61,7 +61,16 @@ describe('One official list, near spelling and linked-page queue',()=>{
   expect(pickNext(after.map(l=>({...l,status:'done'})),new Set(),'p')).toBeNull();
  });
 });
-import { platformFor as pf2, freePlatform as fp2 } from '@/lib/sayyad/rules';
+import { platformFor as pf2, freePlatform as fp2, applyNewUnscannable } from '@/lib/sayyad/rules';
+describe('new unscannable own domain',()=>{
+ const now=new Date('2026-11-24T00:00:00Z');
+ const base=(age:number|null)=>score({url:'https://fazhawwq.example',age});
+ it('adds 25 to a 1-day-old own domain, staying yellow at 40',()=>{const r=applyNewUnscannable(base(1),{platform:'other',ageDays:1,ctFirstSeen:null,now});expect(r.signals['new_unscannable']).toBe(25);expect(r.score).toBe(40);expect(r.level).toBe('yellow');expect(r.reasons_ar).toContain('نطاق عمره أيام وتعذر فحص صفحته — أولوية مراجعة');});
+ it('does not apply on free platforms',()=>{const s=score({url:'https://bait.wixsite.com/x',platform:'wix',age:1});const r=applyNewUnscannable(s,{platform:'wix',ageDays:1,ctFirstSeen:null,now});expect(r).toBe(s);});
+ it('does not apply to a 30-day-old domain',()=>{const s=base(30);expect(applyNewUnscannable(s,{platform:'other',ageDays:30,ctFirstSeen:null,now})).toBe(s);});
+ it('falls back to ct_first_seen when age is unknown',()=>{const r=applyNewUnscannable(base(null),{platform:'other',ageDays:null,ctFirstSeen:'2026-11-22T00:00:00Z',now});expect(r.signals['new_unscannable']).toBe(25);expect(r.score).toBe(25);});
+ it('is never applied twice',()=>{const once=applyNewUnscannable(base(1),{platform:'other',ageDays:1,ctFirstSeen:null,now});const twice=applyNewUnscannable(once,{platform:'other',ageDays:1,ctFirstSeen:null,now});expect(twice).toBe(once);expect(twice.score).toBe(40);});
+});
 describe('social platforms',()=>{
  it('names new social platforms',()=>{expect(pf2('www.facebook.com')).toBe('facebook');expect(pf2('tiktok.com')).toBe('tiktok');expect(pf2('t.me')).toBe('telegram');expect(pf2('telegram.me')).toBe('telegram');expect(pf2('wa.me')).toBe('whatsapp');expect(pf2('api.whatsapp.com')).toBe('whatsapp');expect(pf2('x.com')).toBe('x');expect(pf2('twitter.com')).toBe('x');expect(pf2('snapchat.com')).toBe('snapchat');expect(pf2('example.com')).toBe('other');});
  it('does not treat social platforms as free hosting',()=>{for(const p of ['facebook','tiktok','telegram','whatsapp','x','snapchat','other'])expect(fp2(p)).toBe(false);for(const p of ['linktree','wix','google_sites','pages_dev','netlify','vercel'])expect(fp2(p)).toBe(true);});

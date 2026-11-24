@@ -41,6 +41,17 @@ export function unverifiedFallback<T extends {score:number;level:'green'|'yellow
   if(scored.level!=='green')return {...scored,signals:{...scored.signals,unverified:false}};
   return {...scored,level:'yellow',reasons_ar:[...scored.reasons_ar,unverifiedReason],signals:{...scored.signals,unverified:true}};
 }
+export const newUnscannableReason='نطاق عمره أيام وتعذر فحص صفحته — أولوية مراجعة';
+/** A brand-new own domain whose page could not be scanned rises in the review queue: +25, never red from this rule alone. */
+export function applyNewUnscannable<T extends {score:number;level:'green'|'yellow'|'red';reasons_ar:string[];signals:Record<string,number|boolean|string|null>}>(scored:T,opts:{platform:string;ageDays:number|null;ctFirstSeen:string|null;now?:Date}):T {
+  if(scored.signals['new_unscannable'])return scored;
+  if(freePlatform(opts.platform))return scored;
+  const now=opts.now ?? new Date();
+  const fresh=opts.ageDays!==null?opts.ageDays<=7:(opts.ctFirstSeen?now.getTime()-new Date(opts.ctFirstSeen).getTime()<=7*24*60*60*1000:false);
+  if(!fresh)return scored;
+  const score=Math.min(100,scored.score+25);
+  return {...scored,score,level:riskLevel(score),reasons_ar:[...scored.reasons_ar,newUnscannableReason],signals:{...scored.signals,new_unscannable:25}};
+}
 export type AiFinding = z.infer<typeof aiSchema>;
 export const linkIdSchema = z.object({ link_id: z.string().uuid() });
 export const phraseSchema = z.object({ phrase: z.string().trim().min(1).max(300) });
