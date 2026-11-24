@@ -5,6 +5,7 @@ export type EvidenceSnapshot={
   analysis:{score:number;level:string;reasons_ar:string[];ai_summary_ar:string;domain_age_days:number|null;age_source:string;phones_found:string[];outgoing_domains:string[];page_title:string;created_at:string;asks_payment:boolean;asks_sensitive:boolean};
   hosting:{ip:string|null;asn:string|null;asnname:string|null;country:string|null;server:string|null;tls_issuer:string|null;status:number|null}|null;
   whois?:import('./early').Whois|null;
+  indicators?:import('./indicators').Indicators|null;
   entity:{name_ar:string;name_en:string;official_domains:string[];official_phones:string[]}|null;
   source:{phrase:string|null;source:string|null;rank:number|null;is_ad:boolean};
   chain:{parent:ChainNode|null;children:ChainNode[]};

@@ -92,6 +92,13 @@
       "when": 1795535767322,
       "tag": "0012_phrase_management",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795540387855,
+      "tag": "0013_scammer_indicators",
+      "breakpoints": true
     }
   ]
 }

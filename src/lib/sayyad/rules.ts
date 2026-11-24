@@ -10,6 +10,7 @@ export const aiSchema = z.object({
   scam_type: z.enum(['none','unlicensed_domestic_workers','fund_recovery','fake_insurance','fake_shop_payment','fake_job','fake_investment','fake_real_estate','too_good_price']).optional(),
   scam_confidence: z.number().min(0).max(1).optional(),
   visual_brand_match: z.boolean().optional(), visual_brand_entity: z.string().nullable().optional(),
+  bank_accounts: z.array(z.object({iban:z.string().nullable(),account:z.string().nullable(),bank:z.string().nullable()})).max(10).optional(),
 });
 /** Neutral AI finding used when no page or search evidence exists (lexical-only verdicts). */
 export const neutralAi={impersonated_entity:null,impersonation_confidence:0,asks_payment_or_card:false,asks_sensitive_data:false,phones_found:[],summary_ar:'',scam_type:'none' as const,scam_confidence:0,visual_brand_match:false,visual_brand_entity:null};
@@ -159,7 +160,7 @@ export function chainDestinations(urls:string[],entities:Entity[],depth:number) 
   for(const raw of urls) {try {const url=cleanUrl(raw),domain=hostname(url);if(officialDestination(domain,entities) || domains.has(domain))continue;domains.add(domain);destinations.push(url);if(destinations.length===5)break;}catch{continue;}}
   return destinations;
 }
-const platformAssets:Record<string,string[]>={linktree:['linktr.ee','linktree.com'],wix:['wix.com','wixstatic.com','wixsite.com','wixstudio.com','parastorage.com'],google_sites:['sites.google.com','googleusercontent.com','gstatic.com'],pages_dev:['pages.dev'],netlify:['netlify.app'],vercel:['vercel.app']};
+export const platformAssets:Record<string,string[]>={linktree:['linktr.ee','linktree.com'],wix:['wix.com','wixstatic.com','wixsite.com','wixstudio.com','parastorage.com'],google_sites:['sites.google.com','googleusercontent.com','gstatic.com'],pages_dev:['pages.dev'],netlify:['netlify.app'],vercel:['vercel.app']};
 const socialProfiles=['instagram.com','x.com','twitter.com','facebook.com','youtube.com','tiktok.com','snapchat.com'];
 const contactChannels=['wa.me','api.whatsapp.com','t.me'];
 export function classifyDestinations(domains:string[],pageDomain:string,entities:Entity[]) {

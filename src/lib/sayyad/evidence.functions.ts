@@ -1,3 +1,4 @@
+import { asIndicators } from './indicators';
 import { requireInvestigator } from './role.server';
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
@@ -39,7 +40,7 @@ export const createEvidence=createServerFn({method:'POST'}).middleware([requireS
   const snapshot:EvidenceSnapshot={
     link:{url:link.url,final_url:link.final_url,domain:link.domain,platform:link.platform,rank:link.rank,is_ad:link.is_ad,title:link.title,snippet:link.snippet,maps_phone:link.maps_phone,status:link.status,scan_error:link.scan_error,first_seen_at:link.first_seen_at,scan_started_at:link.scan_started_at},
     analysis:{score:a.score,level:a.level,reasons_ar:a.reasons_ar,ai_summary_ar:a.ai_summary_ar,domain_age_days:a.domain_age_days,age_source:a.age_source,phones_found:a.phones_found,outgoing_domains:a.outgoing_domains,page_title:a.page_title,created_at:a.created_at,...asksFromReasons(a.reasons_ar,(a.signals ?? {}) as Record<string,unknown>)},
-    hosting,whois:(a.whois && typeof a.whois==='object' && !Array.isArray(a.whois)?a.whois:null) as import('./early').Whois|null,entity:entity?{name_ar:entity.name_ar,name_en:entity.name_en,official_domains:entity.official_domains,official_phones:entity.official_phones}:null,
+    hosting,indicators:asIndicators(a.indicators),whois:(a.whois && typeof a.whois==='object' && !Array.isArray(a.whois)?a.whois:null) as import('./early').Whois|null,entity:entity?{name_ar:entity.name_ar,name_en:entity.name_en,official_domains:entity.official_domains,official_phones:entity.official_phones}:null,
     source:{phrase:hunt?.phrase ?? null,source:hunt?.source ?? null,rank:link.rank,is_ad:link.is_ad},
     chain:{parent:parentLink?await node(parentLink):null,children:await Promise.all(childLinks.map(node))},
     page_status:pageStatus,urgent_reason:urgent?urgentReason:null,screenshot_note:bytes?null:noScreenshotNote,

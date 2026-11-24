@@ -24,6 +24,7 @@ export type Database = {
           hosting: Json | null
           id: string
           impersonated_entity_id: string | null
+          indicators: Json | null
           level: string
           link_id: string
           outgoing_domains: string[]
@@ -43,6 +44,7 @@ export type Database = {
           hosting?: Json | null
           id?: string
           impersonated_entity_id?: string | null
+          indicators?: Json | null
           level?: string
           link_id: string
           outgoing_domains?: string[]
@@ -62,6 +64,7 @@ export type Database = {
           hosting?: Json | null
           id?: string
           impersonated_entity_id?: string | null
+          indicators?: Json | null
           level?: string
           link_id?: string
           outgoing_domains?: string[]
@@ -94,18 +97,21 @@ export type Database = {
           analysis: Json
           archived_at: string
           id: string
+          indicators: Json | null
           link_id: string
         }
         Insert: {
           analysis: Json
           archived_at?: string
           id?: string
+          indicators?: Json | null
           link_id: string
         }
         Update: {
           analysis?: Json
           archived_at?: string
           id?: string
+          indicators?: Json | null
           link_id?: string
         }
         Relationships: [

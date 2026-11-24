@@ -36,7 +36,7 @@ export function parseWhois(json:unknown):Whois|null{
 }
 
 const platformNames:Record<string,string>={wix:'Wix',netlify:'Netlify',linktree:'Linktree',google_sites:'Google Sites',vercel:'Vercel',pages_dev:'Cloudflare Pages (pages.dev)'};
-export type TakedownInput={case_no:string|null;url:string;final_url:string|null;platform:string;first_seen_at:string;entity:{name_ar:string;name_en:string;official_domains:string[]}|null;reasons:string[];sha256:string|null;captured_at:string|null;hosting:{ip?:string|null;asn?:string|null;asnname?:string|null;country?:string|null}|null;whois:Whois|null};
+export type TakedownInput={case_no:string|null;url:string;final_url:string|null;platform:string;first_seen_at:string;entity:{name_ar:string;name_en:string;official_domains:string[]}|null;reasons:string[];sha256:string|null;captured_at:string|null;hosting:{ip?:string|null;asn?:string|null;asnname?:string|null;country?:string|null}|null;whois:Whois|null;socials?:string[];links?:string[]};
 const gst=(iso:string|null)=>iso?`${new Date(Date.parse(iso)+4*3600000).toISOString().slice(0,16).replace('T',' ')} (UTC+4)`:'—';
 export const takedownFooter='أُعد آلياً بواسطة الصيّاد للمساعدة — القرار والإرسال للجهة المختصة';
 /** Method notes ("التحليل مبني على…", "الحكم مبني على تحليل الرابط فقط") explain the analysis, they are not evidence: they stay out of the request. */
@@ -57,16 +57,18 @@ export function takedownTexts(t:TakedownInput){
   const ent=t.entity?`${t.entity.name_ar} (${t.entity.official_domains[0] ?? '—'})`:'—',entEn=t.entity?`${t.entity.name_en} (${t.entity.official_domains[0] ?? '—'})`:'—';
   const host=[t.hosting?.ip,t.hosting?.asnname,t.hosting?.country].filter(Boolean).join(' / ')||'—';
   const rs=t.reasons.filter(x=>!isBasisNote(x));
+  // Bank accounts are never included; only scam-page social profiles and outgoing links, defanged.
+  const soc=(t.socials ?? []).map(defangUrl),out=(t.links ?? []).slice(0,10).map(defangUrl);
   const ar=[`إلى: ${r.ar.join('، ')}`,`الموضوع: طلب إيقاف صفحة مشبوهة${t.case_no?` — ${t.case_no}`:''}`,'',
     'السلام عليكم،','نرجو التكرم بمراجعة الرابط التالي وإيقاف النطاق أو الصفحة، لأنه يظهر مؤشرات انتحال لجهة رسمية.','',
     ...(t.case_no?[`رقم القضية: ${t.case_no}`]:[]),`الرابط (معطّل): ${url}`,...(fin?[`الوجهة النهائية: ${fin}`]:[]),`أول رصد: ${gst(t.first_seen_at)}`,`الجهة المنتحَلة: ${ent}`,
-    'أسباب الاشتباه:',...rs.map(x=>`- ${x}`),`بصمة لقطة الشاشة SHA-256: ${t.sha256 ?? '—'}`,`وقت الالتقاط: ${gst(t.captured_at)}`,`الاستضافة / IP: ${host}`,`المسجّل: ${t.whois?.registrar ?? 'غير متاح من السجل'}`,'',
+    'أسباب الاشتباه:',...rs.map(x=>`- ${x}`),...(soc.length?['حسابات التواصل المرتبطة:',...soc.map(x=>`- ${x}`)]:[]),...(out.length?['روابط خارجية في الصفحة:',...out.map(x=>`- ${x}`)]:[]),`بصمة لقطة الشاشة SHA-256: ${t.sha256 ?? '—'}`,`وقت الالتقاط: ${gst(t.captured_at)}`,`الاستضافة / IP: ${host}`,`المسجّل: ${t.whois?.registrar ?? 'غير متاح من السجل'}`,'',
     ...blockAr,'',
     'شاكرين تعاونكم.','',takedownFooter].join('\n');
   const en=[`To: ${r.en.join('; ')}`,`Subject: Request to suspend a suspected impersonation page${t.case_no?` — ${t.case_no}`:''}`,'',
     'Hello,','We kindly ask you to review the URL below and suspend the domain or page, as it shows indicators of impersonating an official entity.','',
     ...(t.case_no?[`Case number: ${t.case_no}`]:[]),`URL (defanged): ${url}`,...(fin?[`Final URL: ${fin}`]:[]),`First detected: ${gst(t.first_seen_at)}`,`Impersonated entity: ${entEn}`,
-    `Indicators (Arabic, from the automated analysis):`,...rs.map(x=>`- ${x}`),`Screenshot SHA-256: ${t.sha256 ?? '—'}`,`Captured at: ${gst(t.captured_at)}`,`Hosting / IP: ${host}`,`Registrar: ${t.whois?.registrar ?? 'not available from the registry'}`,'',
+    `Indicators (Arabic, from the automated analysis):`,...rs.map(x=>`- ${x}`),...(soc.length?['Linked social profiles:',...soc.map(x=>`- ${x}`)]:[]),...(out.length?['Outgoing links on the page:',...out.map(x=>`- ${x}`)]:[]),`Screenshot SHA-256: ${t.sha256 ?? '—'}`,`Captured at: ${gst(t.captured_at)}`,`Hosting / IP: ${host}`,`Registrar: ${t.whois?.registrar ?? 'not available from the registry'}`,'',
     ...blockEn,'',
     'Thank you for your cooperation.','',`${takedownFooter}`,'Prepared automatically by Sayyad to assist — the decision and submission rest with the competent authority.'].join('\n');
   return {ar,en};
@@ -86,10 +88,10 @@ export function ctEarlyCount(links:Pick<Tables<'links'>,'id'|'hunt_id'|'status'>
   return links.filter(l=>{const a=byLink.get(l.id);return l.hunt_id&&ct.has(l.hunt_id)&&l.status!=='removed'&&a&&rec(a.signals)['removed']!==true&&(a.level==='red'||a.level==='yellow');}).length;
 }
 
-export type CaseRow={case_no:string;url:string;final_url:string|null;entity:string|null;level:string;score:number;top_reasons:string[];first_seen:string|null;captured_at:string|null;sha256:string|null;case_status:string;removed:boolean;urgent:'yes'|'no'|'unknown'};
+export type CaseRow={case_no:string;url:string;final_url:string|null;entity:string|null;level:string;score:number;top_reasons:string[];first_seen:string|null;captured_at:string|null;sha256:string|null;case_status:string;removed:boolean;urgent:'yes'|'no'|'unknown';indicators?:import('./indicators').Indicators|null};
 const cell=(v:unknown)=>{const s=v===null||v===undefined?'':String(v);return /[",\n\r]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;};
 export function casesCsv(rows:CaseRow[]){
-  const cols=['case_no','url','final_url','entity','level','score','top_reasons','first_seen','captured_at','sha256','case_status','removed','urgent'] as const;
-  return [cols.join(','),...rows.map(r=>cols.map(c=>c==='url'?cell(defangUrl(r.url)):c==='final_url'?cell(r.final_url?defangUrl(r.final_url):''):c==='top_reasons'?cell(r.top_reasons.join(' | ')):c==='removed'?(r.removed?'yes':'no'):cell(r[c])).join(','))].join('\n');
+  const cols=['case_no','url','final_url','entity','level','score','top_reasons','first_seen','captured_at','sha256','case_status','removed','urgent','phones','whatsapp','ibans','socials'] as const;
+  return [cols.join(','),...rows.map(r=>cols.map(c=>c==='url'?cell(defangUrl(r.url)):c==='final_url'?cell(r.final_url?defangUrl(r.final_url):''):c==='top_reasons'?cell(r.top_reasons.join(' | ')):c==='removed'?(r.removed?'yes':'no'):c==='phones'||c==='whatsapp'||c==='ibans'?cell((r.indicators?.[c] ?? []).join(' | ')):c==='socials'?cell((r.indicators?.socials ?? []).map(x=>x.url).join(' | ')):cell(r[c])).join(','))].join('\n');
 }
 export const casesJson=(rows:CaseRow[])=>JSON.stringify(rows.map(r=>({...r,url:defangUrl(r.url),final_url:r.final_url?defangUrl(r.final_url):null,removed:r.removed?'yes':'no'})),null,2);
