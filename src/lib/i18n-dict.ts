@@ -33,6 +33,7 @@ export const patterns:P[]=[
  [/^اسم الجهة الرسمية مدسوس داخل نطاق آخر \((.+)\)(: .+)?$/,(m,t)=>`Official entity name hidden inside another domain (${t(g(m,1))})${g(m,2)}`],
  [/^اسم (.+) مع كلمات دفع أو تحقق في رابط غير رسمي$/,(m,t)=>`${t(g(m,1))} name with payment/verification words in an unofficial URL`],
  [/^النطاق يستخدم حروفاً مشابهة لتقليد (.+)$/,(m,t)=>`The domain uses look-alike characters to imitate ${g(m,1)==='جهة أو علامة معروفة'?'a known entity or brand':t(g(m,1))}`],
+ [/^الصفحة تشبه شكل (.+) — لم يؤكد التحليل الانتحال$/,(m,t)=>`The page resembles ${t(g(m,1))} — impersonation not confirmed by the analysis`],
  [/^الصفحة تقلّد شكل (.+) \(الشعار\/الألوان\)$/,(m,t)=>`The page imitates the look of ${t(g(m,1))} (logo/colours)`],
  [/^مرتبط بصفحة تنتحل (.+): (.+)$/,(m,t)=>`Linked from a page impersonating ${t(g(m,1))}: ${g(m,2)}`],
  [/^النطاق عمره (\d+) يوم فقط$/,m=>`Domain is only ${g(m,1)} days old`],

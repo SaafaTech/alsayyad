@@ -26,7 +26,7 @@ describe('lexical URL analysis',()=>{
 describe('shorteners and visual impersonation',()=>{
   it('detects shorteners but not linktr.ee',()=>{expect(isShortener('bit.ly')).toBe(true);expect(isShortener('linktr.ee')).toBe(false);});
   it('adds +10 when the original was a shortener and judges the final URL',()=>{const r=score('https://koala-pay.example.net/',{originUrl:'https://bit.ly/abc'});expect(r.signals['shortener']).toBe(10);expect(r.score).toBe(40);});
-  it('visual brand match counts inside impersonation, not as new weight',()=>{const r=score('https://merchant.example.net/',{ai:{...neutralAi,visual_brand_match:true,visual_brand_entity:'Koala'}});expect(r.signals['impersonation']).toBe(35);expect(r.score).toBe(35);
+  it('visual brand match counts inside impersonation, not as new weight',()=>{const r=score('https://merchant.example.net/',{ai:{...neutralAi,impersonation_confidence:.5,visual_brand_match:true,visual_brand_entity:'Koala'}});expect(r.signals['impersonation']).toBe(35);expect(r.score).toBe(35);
     const both=score('https://merchant.example.net/',{ai:{...neutralAi,impersonated_entity:'Koala',impersonation_confidence:.9,visual_brand_match:true,visual_brand_entity:'Koala'}});expect(both.score).toBe(35);expect(both.reasons_ar.some(x=>x.includes('تقلّد شكل'))).toBe(true);});
   it('visual match on the official domain adds nothing',()=>expect(score('https://koala.ae/',{ai:{...neutralAi,visual_brand_match:true,visual_brand_entity:'Koala'}}).score).toBe(0));
 });

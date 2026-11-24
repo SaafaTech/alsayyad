@@ -147,7 +147,7 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   const add=(key:string,points:number,reason:string)=>{signals[key]=points;score+=points;reasons.push(reason);};
   if(named && input.ai.impersonation_confidence>=0.6 && !named.official_domains.some(d=>within(domain,d))) add('impersonation',35,`ينتحل هوية ${named.name_ar} بثقة ${Math.round(input.ai.impersonation_confidence*100)}٪ على نطاق غير رسمي`);
   // Visual imitation counts inside the impersonation signal (no new weight).
-  if(visual){const r=`الصفحة تقلّد شكل ${visual.name_ar} (الشعار/الألوان)`;if(signals['impersonation']===undefined)add('impersonation',35,r);else reasons.push(r);}
+  if(visual){if(input.ai.impersonation_confidence>=0.5){const r=`الصفحة تقلّد شكل ${visual.name_ar} (الشعار/الألوان)`;if(signals['impersonation']===undefined)add('impersonation',35,r);else reasons.push(r);}else reasons.push(`الصفحة تشبه شكل ${visual.name_ar} — لم يؤكد التحليل الانتحال`);}
   const embedded=lexical.find(l=>l.key==='similarity'&&l.embedded);
   if(similar) add('similarity',30,embedded?`${embedded.reason}: ${domain}`:`يحمل اسم ${similar.name_ar} على نطاق غير رسمي: ${domain}`);
   // URL-only signals never double count a key already scored above.

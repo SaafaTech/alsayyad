@@ -1,0 +1,2 @@
+UPDATE public.entities SET official_domains = official_domains || ARRAY(SELECT d FROM unnest(ARRAY['eandmoney.com','eand.com.eg']) d WHERE NOT d = ANY(official_domains)) WHERE name_en = 'e& (Etisalat)';
+UPDATE public.entities SET official_domains = official_domains || ARRAY(SELECT d FROM unnest(ARRAY['qmobility.ae']) d WHERE NOT d = ANY(official_domains)) WHERE name_en ILIKE '%Darb%';
