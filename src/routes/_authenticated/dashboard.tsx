@@ -1,9 +1,11 @@
 import { tr, tf } from '@/lib/i18n';
+import { platformLabel } from '@/lib/sayyad/rules';
 import { createFileRoute,Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { Area,AreaChart,CartesianGrid,XAxis,YAxis,Cell,Pie,PieChart,ResponsiveContainer,Tooltip } from 'recharts';
-import { LayoutDashboard } from 'lucide-react';
+import { useEffect,useRef,useState } from 'react';
+import { LayoutDashboard,Search,ScanLine,AlertTriangle,ShieldAlert,Building2,FileText,Network,ShieldPlus,TimerOff,Clock,Coins,CheckCircle2 } from 'lucide-react';
 import { meta } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { listEvidence } from '@/lib/sayyad/evidence.functions';
@@ -44,6 +46,13 @@ function Timeline({data}:{data:D[]}){
   const tick={fill:'var(--muted-foreground)',fontSize:11};const step=Math.max(0,Math.ceil(data.length/8)-1);
   return <div className="timeline-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={data} margin={{top:10,right:8,left:8,bottom:0}}><CartesianGrid vertical={false} strokeOpacity={0.12}/><XAxis dataKey="name" tick={tick} interval={step} reversed tickLine={false} axisLine={false} tickMargin={8} minTickGap={12}/><YAxis allowDecimals={false} orientation="right" width={32} tick={tick} tickLine={false} axisLine={false} tickMargin={6}/><Tooltip content={<TipCard/>} cursor={{stroke:'var(--border)'}}/><Area type="monotone" dataKey="value" stroke="var(--primary)" strokeWidth={2} fill="var(--primary)" fillOpacity={0.15} dot={{r:3,fill:'var(--primary)',strokeWidth:0}} activeDot={{r:5}} isAnimationActive={!noMotion()} label={data.length<=24?{position:'top',fill:'var(--foreground)',fontSize:11,formatter:(v:unknown)=>Number(v)>0?String(v):''}:false}/></AreaChart></ResponsiveContainer></div>;
 }
+const icons=[Search,ScanLine,AlertTriangle,ShieldAlert,Building2,FileText,Network,ShieldPlus,TimerOff];
+function CountUp({v}:{v:number}){
+  const [n,setN]=useState(v);const done=useRef(false);
+  useEffect(()=>{if(done.current){setN(v);return;}done.current=true;if(noMotion()||v<=0){setN(v);return;}
+    let raf=0;const t0=performance.now();const step=(t:number)=>{const k=Math.min(1,(t-t0)/700);setN(Math.round(v*(1-Math.pow(1-k,3))));if(k<1)raf=requestAnimationFrame(step);};setN(0);raf=requestAnimationFrame(step);return()=>cancelAnimationFrame(raf);},[v]);
+  return <>{n}</>;
+}
 function Dashboard(){
   const engine=useEngine(),list=useServerFn(listEvidence),ev=useQuery({queryKey:['evidence'],queryFn:()=>list(),refetchInterval:10000}),camps=useServerFn(listCampaigns),cq=useQuery({queryKey:['campaigns'],queryFn:()=>camps(),refetchInterval:15000}),rq=useReviews(),hq=useQuery({queryKey:['analysis-history'],queryFn:async()=>{const r=await supabase.from('analysis_history').select('link_id,analysis');if(r.error)throw r.error;return r.data;},refetchInterval:30000});
   if(engine.loading)return <div className="empty-state">{tr("جارٍ تحميل المؤشرات…")}</div>;
@@ -53,12 +62,12 @@ function Dashboard(){
   const rv=reviewStats(rq.data ?? [],d),dom=(id:string)=>d.links.find(l=>l.id===id)?.domain ?? id;
   const counters:[string,number,string][]= [[tr("عمليات البحث"),s.searches,''],[tr("الروابط المفحوصة"),s.checked,''],[tr("تحتاج مراجعة"),s.yellow,'yellow'],[tr("خطر (أحمر)"),s.red,'red'],[tr("جهات منتحلة"),s.entities,''],[tr("ملفات أدلة"),s.evidence,''],[tr("الحملات"),s.campaigns,''],[tr("رُصد قبل ظهوره في البحث"),early,'yellow'],[tr("مواقع توقفت بعد الرصد"),tk.stopped,'']];
   return <div><div className="page-heading"><div><div className="eyebrow"><LayoutDashboard size={14}/> {tr("غرفة العمليات")}</div><h1>{tr("لوحة التحكم")}</h1><p>{tr("مؤشرات حية من نتائج الرصد المحفوظة.")}</p></div></div>
-    <div className="dash-counters">{counters.map(([l,v,c])=>l===tr('الحملات')?<Link key={l} to="/campaigns" className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></Link>:<div key={l} className={`counter dash-counter ${c}`}><span>{l}</span><strong>{v}</strong></div>)}<div className="counter dash-counter"><span>{tr("التكلفة التقريبية لكل رابط")}</span><strong dir="ltr">{(()=>{const c=costPerLink(d);return c===null?"—":`$${formatCost(c)}`;})()}</strong><small title={tr("تقديري: البحث + الذكاء الاصطناعي (Cloudflare ضمن الخطة)")}>{tr("تقديري: البحث + الذكاء الاصطناعي (Cloudflare ضمن الخطة)")}</small></div><div className="counter dash-counter"><span>{tr("متوسط الوقت حتى التوقف")}</span><strong>{tk.avgHours===null?'—':tf("{0} ساعة",tk.avgHours)}</strong></div><div className="counter dash-counter"><span>{tr("دقة المراجعة")}</span><strong>{rv.pct===null?'—':`${rv.pct}%`}</strong><small>{rv.total?<>{tr("من")} {rv.total} {tr("مراجعة")}</>:tr("لا توجد مراجعات بعد — استخدم زر «الحكم صحيح؟» في التحليل")}</small></div></div>
+    <div className="dash-counters">{counters.map(([l,v,c],i)=>{const Icon=icons[i] ?? Search;const inner=<><span className="dc-icon"><Icon size={15}/></span><span>{l}</span><strong><CountUp v={v}/>{c==='red'&&v>0&&<i className="live-dot" aria-hidden/>}</strong></>;return l===tr('الحملات')?<Link key={l} to="/campaigns" className={`counter dash-counter ${c}`}>{inner}</Link>:<div key={l} className={`counter dash-counter ${c}`}>{inner}</div>;})}<div className="counter dash-counter"><span className="dc-icon"><Coins size={15}/></span><span>{tr("التكلفة التقريبية لكل رابط")}</span><strong dir="ltr">{(()=>{const c=costPerLink(d);return c===null?"—":`$${formatCost(c)}`;})()}</strong><small title={tr("تقديري: البحث + الذكاء الاصطناعي (Cloudflare ضمن الخطة)")}>{tr("تقديري: البحث + الذكاء الاصطناعي (Cloudflare ضمن الخطة)")}</small></div><div className="counter dash-counter"><span className="dc-icon"><Clock size={15}/></span><span>{tr("متوسط الوقت حتى التوقف")}</span><strong>{tk.avgHours===null?'—':tf("{0} ساعة",tk.avgHours)}</strong></div><div className="counter dash-counter"><span className="dc-icon"><CheckCircle2 size={15}/></span><span>{tr("دقة المراجعة")}</span><strong>{rv.pct===null?'—':<><CountUp v={rv.pct}/>%</>}</strong><small>{rv.total?<>{tr("من")} {rv.total} {tr("مراجعة")}</>:tr("لا توجد مراجعات بعد — استخدم زر «الحكم صحيح؟» في التحليل")}</small></div></div>
     <div className="dash-grid mb-6">{([[tr("آخر الإنذارات الكاذبة"),rv.falseAlarms],[tr("احتيال فات"),rv.missed]] as const).map(([t,ids])=><section key={t} className="analysis-section dash-card"><h2>{t}</h2>{ids.length?<ul className="text-sm space-y-1">{ids.map(id=><li key={id}><Link to="/analysis" search={{id}} className="text-primary mono" dir="ltr">{dom(id)}</Link></li>)}</ul>:<p className="dash-none">{tr("لا توجد")}</p>}</section>)}</div>
     <div className="dash-grid">
       <section className="analysis-section dash-card"><h2>{tr("توزيع الخطورة")}</h2><Donut data={s.distribution}/></section>
       <section className="analysis-section dash-card"><h2>{tr("أكثر الجهات انتحالاً")}</h2><BarList data={s.topEntities} tone="gold"/></section>
-      <section className="analysis-section dash-card"><h2>{tr("منصات الروابط المشبوهة والخطرة")}</h2><BarList data={s.platforms} tone="amber"/></section>
+      <section className="analysis-section dash-card"><h2>{tr("منصات الروابط المشبوهة والخطرة")}</h2><BarList data={s.platforms.map(p=>({...p,name:platformLabel(p.name)}))} tone="amber"/></section>
       <section className="analysis-section dash-card"><h2>{tr("زمن الرصد (أصفر + أحمر بالساعة، GMT+4)")}</h2><Timeline data={s.timeline}/></section>
     </div>
     <section className="analysis-section mt-6"><h2>{tr("أحدث الروابط الخطرة")}</h2>{!s.latestRed.length?<Empty/>:<div className="evidence-table-wrap"><table className="evidence-table"><thead><tr><th>{tr("النطاق")}</th><th>{tr("الجهة")}</th><th>{tr("الدرجة")}</th><th>{tr("السبب الأول")}</th><th>{tr("الوقت")}</th></tr></thead><tbody>{s.latestRed.map(r=><tr key={r.id}><td><Link to="/analysis" search={{id:r.id}} className="text-primary" dir="ltr">{r.domain}</Link></td><td>{r.entity}</td><td><span className="risk red"><b>{r.score}</b></span></td><td>{r.reason}</td><td className="text-xs">{r.time}</td></tr>)}</tbody></table></div>}</section>

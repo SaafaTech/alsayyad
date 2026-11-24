@@ -61,3 +61,8 @@ describe('One official list, near spelling and linked-page queue',()=>{
   expect(pickNext(after.map(l=>({...l,status:'done'})),new Set(),'p')).toBeNull();
  });
 });
+import { platformFor as pf2, freePlatform as fp2 } from '@/lib/sayyad/rules';
+describe('social platforms',()=>{
+ it('names new social platforms',()=>{expect(pf2('www.facebook.com')).toBe('facebook');expect(pf2('tiktok.com')).toBe('tiktok');expect(pf2('t.me')).toBe('telegram');expect(pf2('telegram.me')).toBe('telegram');expect(pf2('wa.me')).toBe('whatsapp');expect(pf2('api.whatsapp.com')).toBe('whatsapp');expect(pf2('x.com')).toBe('x');expect(pf2('twitter.com')).toBe('x');expect(pf2('snapchat.com')).toBe('snapchat');expect(pf2('example.com')).toBe('other');});
+ it('does not treat social platforms as free hosting',()=>{for(const p of ['facebook','tiktok','telegram','whatsapp','x','snapchat','other'])expect(fp2(p)).toBe(false);for(const p of ['linktree','wix','google_sites','pages_dev','netlify','vercel'])expect(fp2(p)).toBe(true);});
+});

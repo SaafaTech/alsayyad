@@ -86,9 +86,13 @@ export function mentionsPayment(texts:(string|null|undefined)[]) {
   return paymentWords.some(w=>/^[a-z ]+$/.test(w)?new RegExp(`(^|[^a-z])${w}`).test(t):t.includes(w));
 }
 export function platformFor(domain: string) {
-  const platforms: [string,string][]=[['linktr.ee','linktree'],['wixsite.com','wix'],['wixstudio.com','wix'],['wix.com','wix'],['sites.google.com','google_sites'],['pages.dev','pages_dev'],['netlify.app','netlify'],['vercel.app','vercel'],['instagram.com','instagram']];
+  const platforms: [string,string][]=[['linktr.ee','linktree'],['wixsite.com','wix'],['wixstudio.com','wix'],['wix.com','wix'],['sites.google.com','google_sites'],['pages.dev','pages_dev'],['netlify.app','netlify'],['vercel.app','vercel'],['instagram.com','instagram'],['facebook.com','facebook'],['tiktok.com','tiktok'],['t.me','telegram'],['telegram.me','telegram'],['wa.me','whatsapp'],['api.whatsapp.com','whatsapp'],['x.com','x'],['twitter.com','x'],['snapchat.com','snapchat']];
+
   return platforms.find(([d])=>within(domain,d))?.[1] ?? 'other';
 }
+export const platformList=['linktree','wix','google_sites','pages_dev','netlify','vercel','instagram','facebook','tiktok','telegram','whatsapp','x','snapchat','other'];
+/** Display name for a stored platform key; 'other' means the site has its own domain. */
+export const platformLabel=(p:string)=>p==='other'?'نطاق خاص':p;
 export const freePlatform = (platform: string)=>['linktree','wix','google_sites','pages_dev','netlify','vercel'].includes(platform);
 export const registrationDomain = (domain: string)=>getDomain(domain,{allowPrivateDomains:false}) ?? domain;
 export function normalizePhone(p: string) {
