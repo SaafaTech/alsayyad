@@ -2,7 +2,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
 import { linkIdSchema, phraseSchema, cleanUrl, scanSubmissionSchema, officialMatch, hostname } from './rules';
-import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis } from './engine.server';
+import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis, scanSubmissionUrl, scanRefusalReason, scanRefusalMessage } from './engine.server';
 export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
   const db=context.supabase;
   const [es,phrases,links,analyses,hunts]=await Promise.all([db.from('entities').select('*').order('name_ar'),db.from('search_phrases').select('*').eq('active',true),db.from('links').select('*').order('first_seen_at',{ascending:false}),db.from('analyses').select('*'),db.from('hunts').select('*').order('created_at',{ascending:false})]);
@@ -24,7 +24,8 @@ export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabas
   const official=officialMatch(hostname(link.url),await entities(db));if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,null,[]);return {started:false,status:'official'};}
   const claimed=must(await db.rpc('claim_scan',{_link_id:link.id}));if(!claimed)return {started:false,status:'waiting'};
   try {
-    const r=await providerFetch(`${cfBase(account)}/scan`,{method:'POST',headers:cfHeaders(token),body:JSON.stringify({url:cleanUrl(link.url),visibility:'Unlisted'})});
+    const hunt=link.hunt_id?requireData(await db.from('hunts').select('source').eq('id',link.hunt_id).single()):null;
+    const r=await providerFetch(`${cfBase(account)}/scan`,{method:'POST',headers:cfHeaders(token),body:JSON.stringify({url:scanSubmissionUrl(link.url,hunt?.source ?? 'manual'),visibility:'Public'})});
     if(r.status===429) {
       must(await db.from('links').update({status:'pending',scan_started_at:null,scan_error:null}).eq('id',link.id));
       // Persist the diagnostic claim so separate server invocations log at most once per link.
@@ -32,7 +33,14 @@ export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabas
       if(logged.length)console.warn('Cloudflare scan HTTP 429');
       return {started:false,status:'waiting'};
     }
-    if(!r.ok)throw new Error('رفض Cloudflare بدء الفحص؛ تحقق من صلاحيات URL Scanner والرصيد');
+    if(!r.ok) {
+      const message=scanRefusalMessage(await r.text(),token);
+      const logged=requireData(await db.from('engine_cache').upsert({key:`scan-refusal:${link.id}`,value:{http_status:r.status},expires_at:new Date(Date.now()+86400000).toISOString()},{onConflict:'key',ignoreDuplicates:true}).select('key'));
+      if(logged.length)console.warn(`Cloudflare scan HTTP ${r.status}: ${message}`);
+      must(await db.from('links').update({scan_error:scanRefusalReason}).eq('id',link.id));
+      const result=await searchEvidenceAnalysis(db,{...link,status:'scanning',scan_error:scanRefusalReason});
+      return {started:false,status:result.status};
+    }
     const json:unknown=await r.json();const env=scanSubmissionSchema.safeParse(json);if(!env.success)throw new Error('لم يصل معرّف فحص صالح من Cloudflare');const uuid=env.data.uuid;
     must(await db.from('links').update({scan_uuid:uuid}).eq('id',link.id));return {started:true,status:'scanning'};
   }catch(e){must(await db.from('links').update({status:'error',scan_error:e instanceof Error?e.message:'تعذر بدء الفحص'}).eq('id',link.id));throw e;}

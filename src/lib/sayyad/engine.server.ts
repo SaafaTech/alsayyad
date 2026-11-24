@@ -21,6 +21,22 @@ export async function providerFetch(url:string,init:RequestInit={},rdapOrigins:s
 export function cfBase(account:string) {if(!/^[a-f0-9]{32}$/i.test(account))throw new Error('إعداد حساب Cloudflare غير صالح');return `https://api.cloudflare.com/client/v4/accounts/${account}/urlscanner/v2`;}
 export function cfHeaders(token:string){return {'Authorization':`Bearer ${token}`,'Content-Type':'application/json'};}
 export function cfGetHeaders(token:string){return {'Authorization':`Bearer ${token}`};}
+export function scanSubmissionUrl(url:string,source:string|null) {
+  const submitted=new URL(cleanUrl(url));
+  if(source==='manual'){submitted.search='';submitted.hash='';}
+  return submitted.href;
+}
+export const scanRefusalReason='رفض Cloudflare فحص الرابط؛ التقييم مبني على نتيجة البحث وبيانات النطاق فقط';
+export function scanRefusalMessage(body:string,token:string) {
+  let message=body;
+  try {
+    const parsed=z.object({errors:z.array(z.object({message:z.string().optional()})).optional(),message:z.string().optional()}).parse(JSON.parse(body));
+    message=parsed.errors?.map(e=>e.message).filter(Boolean).join('; ')||parsed.message||'Cloudflare refused the scan';
+  } catch { /* Non-JSON errors are summarized after removing possible credentials. */ }
+  if(token)message=message.split(token).join('[redacted]');
+  return message.replace(/https?:\/\/[^\s"<>]+/gi,value=>{try{const u=new URL(value);u.search='';u.hash='';u.username='';u.password='';return u.href;}catch{return '[URL redacted]';}}).replace(/(bearer\s+|(?:token|api[_-]?key|authorization|password)\s*[:=]\s*)[^\s,;"}]+/gi,'$1[redacted]').slice(0,300);
+}
+
 export async function entities(db:Db) {return requireData(await db.from('entities').select('*'));}
 export async function addLink(db:Db,input:{url:string;hunt_id:string;rank?:number;title?:string;snippet?:string;maps_phone?:string|null;is_ad?:boolean;parent_link_id?:string;depth?:number},es:Entity[]) {
   let url:string;try{url=cleanUrl(input.url);}catch{return null;}
@@ -116,10 +132,10 @@ export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
     const ai=await aiAnalyze({url:link.url,final_url:link.url,page_title:link.title ?? '',page_text:link.snippet ?? '',outgoing_domains:[],entities:es});
     const scored=scoreFinding({url:link.url,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
     must(await db.from('analyses').upsert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:link.title ?? '',outgoing_domains:[],phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,'تعذر فحص الصفحة عبر Cloudflare؛ التقييم مبني على نتيجة البحث وبيانات النطاق فقط'],ai_summary_ar:ai.summary_ar},{onConflict:'link_id'}));
-    must(await db.from('links').update({status:'done',scan_error:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));
+    must(await db.from('links').update({status:'done',scan_error:link.scan_error===scanRefusalReason?scanRefusalReason:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));
     return {status:'done'} as const;
   } catch {
-    must(await db.from('links').update({status:'error',scan_error:'تعذر إكمال تقييم أدلة البحث وبيانات النطاق؛ لم يُصنّف الرابط على أنه آمن'}).eq('id',link.id));
+    must(await db.from('links').update({status:'error',scan_error:link.scan_error===scanRefusalReason?scanRefusalReason:'تعذر إكمال تقييم أدلة البحث وبيانات النطاق؛ لم يُصنّف الرابط على أنه آمن'}).eq('id',link.id));
     return {status:'error'} as const;
   }
 }
