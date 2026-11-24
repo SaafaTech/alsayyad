@@ -17,3 +17,11 @@ describe('engine accuracy rules',()=>{
   const r=accuracy(['a','b','c','d','e'].map(id=>({link_id:id,url:`https://${id}.example.com`})),lv);
   expect(r.failed).toBe(2);expect(r.removed).toBe(1);expect(r.judged).toBe(2);expect(r.detection).toBe(0.5);});
 });
+import {dashboardStats} from '@/lib/sayyad/dashboard';
+describe('dashboard and removed pages',()=>{
+ it('a removed page is counted as تعذر, not مشبوه',()=>{
+  const link={id:'l1',status:'removed',hunt_id:null,platform:'other',domain:'gone.example.com'} as never;
+  const analysis={link_id:'l1',level:'yellow',score:0,signals:{removed:true},impersonated_entity_id:null,created_at:'2026-11-24T05:00:00Z',reasons_ar:[]} as never;
+  const s=dashboardStats({links:[link],analyses:[analysis],hunts:[],entities:[]},0,new Date('2026-11-24T06:00:00Z'));
+  expect(s.yellow).toBe(0);expect(s.distribution.find(d=>d.key==='error')?.value).toBe(1);});
+});

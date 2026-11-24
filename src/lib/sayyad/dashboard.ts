@@ -7,8 +7,10 @@ export const timelineStart=Date.parse('2026-11-24T04:00:00Z'); // 08:00 GMT+4
 export function dashboardStats(input:W,evidenceCount:number,now:Date,campaignCount=0){
   const d=withoutExpert(input);
   const byLink=new Map(d.analyses.map(a=>[a.link_id,a]));
-  const flagged=d.links.map(l=>({l,a:byLink.get(l.id)})).filter(x=>x.l.status!=='official'&&x.a&&(x.a.level==='yellow'||x.a.level==='red'));
-  const bucket=(l:Tables<'links'>)=>{if(l.status==='official')return 'official';const a=byLink.get(l.id);if(a)return a.level;if(l.status==='error'||l.status==='unscannable')return 'error';return null;};
+  // Removed pages carry a placeholder yellow row; they are never a suspicious verdict.
+  const removed=(l:Tables<'links'>)=>l.status==='removed'||(byLink.get(l.id)?.signals as Record<string,unknown>|null)?.['removed']===true;
+  const flagged=d.links.map(l=>({l,a:byLink.get(l.id)})).filter(x=>x.l.status!=='official'&&!removed(x.l)&&x.a&&(x.a.level==='yellow'||x.a.level==='red'));
+  const bucket=(l:Tables<'links'>)=>{if(l.status==='official')return 'official';if(removed(l))return 'error';const a=byLink.get(l.id);if(a)return a.level;if(l.status==='error'||l.status==='unscannable')return 'error';return null;};
   const counts={green:0,yellow:0,red:0,official:0,error:0} as Record<string,number>;
   for(const l of d.links){const b=bucket(l);if(b&&b in counts)counts[b]=(counts[b] ?? 0)+1;}
   const name=(id:string|null)=>d.entities.find(e=>e.id===id)?.name_ar ?? null;
