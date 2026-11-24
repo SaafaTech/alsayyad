@@ -7,7 +7,28 @@ export const aiSchema = z.object({
   impersonated_entity: z.string().nullable(), impersonation_confidence: z.number().min(0).max(1),
   asks_payment_or_card: z.boolean(), asks_sensitive_data: z.boolean(),
   phones_found: z.array(z.string().regex(/^\d+$/)).max(30), summary_ar: z.string().max(1000),
+  scam_type: z.enum(['none','unlicensed_domestic_workers','fund_recovery','fake_insurance','fake_shop_payment','fake_job','fake_investment','fake_real_estate','too_good_price']).optional(),
+  scam_confidence: z.number().min(0).max(1).optional(),
 });
+export const scamTypes=['none','unlicensed_domestic_workers','fund_recovery','fake_insurance','fake_shop_payment','fake_job','fake_investment','fake_real_estate','too_good_price'] as const;
+export const scamReasons:Record<string,string>={unlicensed_domestic_workers:'عرض عمالة منزلية بنمط احتيالي (بدون ترخيص واضح)',fund_recovery:'وعد باسترجاع أموال مسروقة (نمط احتيال معروف)',fake_insurance:'عرض تأمين بنمط احتيالي',fake_shop_payment:'متجر أو رابط دفع بنمط احتيالي',fake_job:'عرض وظيفة بنمط احتيالي',fake_investment:'عرض استثمار بنمط احتيالي',fake_real_estate:'عرض عقاري بنمط احتيالي',too_good_price:'أسعار غير واقعية بنمط احتيالي'};
+const riskyTlds=['live','site','online','xyz','shop','top','icu','buzz','click','store','cfd','sbs'];
+const removedHosts=['accounts.google.com','www.wix.com','wix.com','app.netlify.com','www.netlify.com','login.microsoftonline.com'];
+const removedTitles=['page not found','site not found','not found','404',"this site isn't available",'deploy not found','الصفحة غير موجودة'];
+/** A taken-down page: 404/410, a redirect to a platform login/landing host, or a not-found title. */
+export function isRemovedPage(input:{status:number|null;finalUrl:string;redirected:boolean;title?:string|null}) {
+  if(input.status===404||input.status===410)return true;
+  const u=new URL(input.finalUrl),h=u.hostname.toLowerCase();
+  if(input.redirected&&(removedHosts.includes(h)||(h==='linktr.ee'&&u.pathname==='/')))return true;
+  const t=(input.title ?? '').trim().toLowerCase().replace(/[’`]/g,"'");
+  return !!t&&removedTitles.some(x=>t.includes(x));
+}
+export const unverifiedReason='تعذر فحص الصفحة؛ لا يمكن الحكم بأنها آمنة — تحتاج مراجعة يدوية';
+/** Fallback scoring can never call a page safe: green becomes yellow (score kept) and is flagged unverified. */
+export function unverifiedFallback<T extends {score:number;level:'green'|'yellow'|'red';reasons_ar:string[];signals:Record<string,number|boolean|string|null>}>(scored:T):T {
+  if(scored.level!=='green')return {...scored,signals:{...scored.signals,unverified:false}};
+  return {...scored,level:'yellow',reasons_ar:[...scored.reasons_ar,unverifiedReason],signals:{...scored.signals,unverified:true}};
+}
 export type AiFinding = z.infer<typeof aiSchema>;
 export const linkIdSchema = z.object({ link_id: z.string().uuid() });
 export const phraseSchema = z.object({ phrase: z.string().trim().min(1).max(300) });
@@ -93,8 +114,12 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   const phones=[...new Set([...input.ai.phones_found,...(input.mapsPhone?[input.mapsPhone]:[])].map(normalizePhone))];
   const mismatch=entity ? phones.find(p=>uaePhone(p) && !entity.official_phones.some(o=>canonicalPhone(o)===canonicalPhone(p))) : null;
   if(mismatch && entity) add('phone_mismatch',10,`رقم الهاتف ${mismatch} لا يطابق الأرقام الرسمية لـ${entity.name_ar}: ${entity.official_phones.join('، ') || 'لا توجد أرقام مسجلة'}`);
+  const scam=input.ai.scam_type ?? 'none',scamConf=input.ai.scam_confidence ?? 0;
+  if(scam!=='none'&&scamConf>=0.6) add('scam_pattern',30,scamReasons[scam] ?? 'نمط احتيال معروف');
+  const suffix=getPublicSuffix(domain,{allowPrivateDomains:false}) ?? '';
+  if(!freePlatform(input.platform)&&riskyTlds.includes(suffix)) add('risky_tld',10,`امتداد نطاق شائع في الاحتيال (.${suffix})`);
   if(freePlatform(input.platform)) add('free_platform',10,`الموقع مستضاف على منصة مجانية: ${input.platform}`);
-  score=Math.min(100,score);signals['confidence']=input.ai.impersonation_confidence;
+  score=Math.min(100,score);signals['confidence']=input.ai.impersonation_confidence;signals['scam_type']=scam;signals['scam_confidence']=scamConf;
   return {score,level:riskLevel(score),reasons_ar:reasons.length?reasons:['لا توجد علامات انتحال في الأدلة المتاحة'],signals,entity,phones};
 }
 export function chainDestinations(urls:string[],entities:Entity[],depth:number) {
@@ -119,6 +144,6 @@ export function classifyDestinations(domains:string[],pageDomain:string,entities
   return out;
 }
 export function applyOfficialDestinations<T extends {score:number;level:'green'|'yellow'|'red';reasons_ar:string[];signals:Record<string,number|boolean|string|null>}>(scored:T,destinations:ReturnType<typeof classifyDestinations>,platform:string,ai:AiFinding):T {
-  if(!freePlatform(platform)||destinations.official.length<1||destinations.unofficial.length>0||ai.asks_sensitive_data)return scored;
+  if(!freePlatform(platform)||destinations.official.length<1||destinations.unofficial.length>0||ai.asks_sensitive_data||scored.signals['scam_pattern'])return scored;
   return {...scored,score:0,level:'green',reasons_ar:[`صفحة وسيطة كل روابطها تودي لمواقع رسمية: ${destinations.official.slice(0,4).join('، ')}`],signals:{...scored.signals,official_destinations:true}};
 }

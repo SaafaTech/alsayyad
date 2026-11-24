@@ -7,7 +7,9 @@ import { useSession } from './session';
 import { EngineProvider } from './engine-context';
 export const meta=(title:string,description:string)=>({meta:[{title:`${title} | الصيّاد Sayyad`},{name:'description',content:description},{property:'og:title',content:`${title} | الصيّاد Sayyad`},{property:'og:description',content:description},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]});
 export function Brand(){return <div className="flex items-center gap-3 text-primary"><div className="brand-eye"><Eye size={25}/></div><span className="text-xl font-semibold whitespace-nowrap">الصيّاد <span className="text-primary/50">|</span> <span dir="ltr">Sayyad</span></span></div>;}
-export function RiskBadge({score,level,status}:{score?:number;level?:string;status?:string}) {
+export const removedSignal=(signals:unknown)=>!!signals&&typeof signals==='object'&&(signals as Record<string,unknown>)['removed']===true;
+export function RiskBadge({score,level,status,removed}:{score?:number;level?:string;status?:string;removed?:boolean}) {
+  if(removed||status==='removed')return <span className="risk unknown"><AlertTriangle size={14}/>محذوفة</span>;
   if(score===undefined&&(status==='unscannable'||status==='error'))return <span className="risk unknown"><AlertTriangle size={14}/>{status==='unscannable'?'غير قابل للفحص':'تعذر التحليل'} —</span>;
   if(score===undefined)return <span className="risk pending"><Radar size={14}/>{status==='scanning'?'جارٍ الفحص':'بانتظار الفحص'} —</span>;
   const Icon=level==='red'?ShieldAlert:level==='yellow'?AlertTriangle:ShieldCheck;

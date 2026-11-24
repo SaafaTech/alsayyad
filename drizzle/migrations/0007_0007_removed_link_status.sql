@@ -1,0 +1,2 @@
+ALTER TABLE public.links DROP CONSTRAINT links_status_check;
+ALTER TABLE public.links ADD CONSTRAINT links_status_check CHECK (status IN ('official','pending','scanning','done','unscannable','error','removed'));

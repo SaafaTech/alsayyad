@@ -50,9 +50,17 @@ export function patternStats(rows:Pick<ExpertRow,'url_raw'|'url'|'domain'|'platf
     topTokens:tally(tokens).slice(0,15),
     nameGroups:[...groups].filter(([,d])=>new Set(d).size>=2).map(([key,d])=>({key:key.split('|')[1] ?? key,domains:[...new Set(d)]})).sort((a,b)=>b.domains.length-a.domains.length)};
 }
+/** Classify one expert row: unverified fallbacks and error/unscannable links are 'failed', taken-down pages 'removed'. */
+export function expertLevel(a:{level:string;signals:unknown}|undefined,status:string|undefined){
+  const sig=(a?.signals && typeof a.signals==='object' ? a.signals : {}) as Record<string,unknown>;
+  if(sig['removed']===true||status==='removed')return 'removed';
+  if(a&&sig['unverified']===true)return 'failed';
+  if(a)return a.level;
+  return status&&['error','unscannable'].includes(status)?'failed':null;
+}
 export function accuracy(rows:{link_id:string|null;url:string}[],level:(linkId:string)=>string|null){
-  const c={red:0,yellow:0,green:0,failed:0};const greens:string[]=[];
-  for(const r of rows){if(!r.link_id)continue;const l=level(r.link_id);if(l==='red'||l==='yellow'||l==='green'){c[l]++;if(l==='green')greens.push(r.url);}else if(l==='failed')c.failed++;}
-  const scanned=c.red+c.yellow+c.green+c.failed;
-  return {...c,scanned,detection:scanned?(c.red+c.yellow)/scanned:0,strict:scanned?c.red/scanned:0,greens};
+  const c={red:0,yellow:0,green:0,failed:0,removed:0};const greens:string[]=[];
+  for(const r of rows){if(!r.link_id)continue;const l=level(r.link_id);if(l==='red'||l==='yellow'||l==='green'||l==='failed'||l==='removed'){c[l]++;if(l==='green')greens.push(r.url);}}
+  const judged=c.red+c.yellow+c.green,scanned=judged+c.failed+c.removed;
+  return {...c,scanned,judged,detection:judged?(c.red+c.yellow)/judged:0,strict:judged?c.red/judged:0,greens};
 }
