@@ -166,6 +166,13 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   const suffix=getPublicSuffix(domain,{allowPrivateDomains:false}) ?? '';
   if(!freePlatform(input.platform)&&riskyTlds.includes(suffix)) add('risky_tld',10,`امتداد نطاق شائع في الاحتيال (.${suffix})`);
   if(freePlatform(input.platform)) add('free_platform',10,`الموقع مستضاف على منصة مجانية: ${input.platform}`);
+  // Check scored keys before adding confidence/lexical metadata, which carries no weight.
+  const brandOnlyKeys=['impersonation','similarity','free_platform','risky_tld'];
+  if(score>=60 && Object.keys(signals).every(key=>brandOnlyKeys.includes(key)) && input.ai.impersonation_confidence<0.5 && input.ai.asks_payment_or_card===false && input.ai.asks_sensitive_data===false && !asksPayment && input.age!==null && input.age>=90){
+    score=55;
+    reasons.push('يحمل اسم وشكل الجهة بدون طلب دفع أو بيانات — قد يكون وكيلاً أو فرعاً رسمياً، يحتاج تحقق');
+    signals['brand_only_cap']=true;
+  }
   score=Math.min(100,score);signals['confidence']=input.ai.impersonation_confidence;signals['scam_type']=scam;signals['scam_confidence']=scamConf;signals['lexical']=lexPoints;if(input.ai.visual_brand_match!==undefined){signals['visual_brand_match']=input.ai.visual_brand_match;signals['visual_brand_entity']=input.ai.visual_brand_entity ?? null;}
   return {score,level:riskLevel(score),reasons_ar:reasons.length?reasons:['لا توجد علامات انتحال في الأدلة المتاحة'],signals,entity,phones};
 }
