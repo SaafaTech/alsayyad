@@ -5,6 +5,20 @@ import { getWorkspace,searchGoogle,searchMaps,scanLink,pollScan,addManualLink } 
 import { toast } from 'sonner';
 type Workspace=Awaited<ReturnType<typeof getWorkspace>>;
 type Engine={data:Workspace|undefined;loading:boolean;error:string|null;running:boolean;progress:string;runSearch:(phrase:string,source:'google'|'maps')=>Promise<void>;startHunt:()=>Promise<void>;checkLink:(url:string)=>Promise<string|null>;stop:()=>void;resume:()=>Promise<void>};
+type QueueLink={id:string;status:string;parent_link_id:string|null};
+/** Ids in scope for a run: everything, or one link plus every link it queued (and their children). */
+export function scopeIds(links:QueueLink[],onlyId?:string) {
+  if(!onlyId)return null;
+  const scope=new Set([onlyId]);let grew=true;
+  while(grew){grew=false;for(const l of links)if(l.parent_link_id&&scope.has(l.parent_link_id)&&!scope.has(l.id)){scope.add(l.id);grew=true;}}
+  return scope;
+}
+/** Next link for a worker; 'wait' while other workers may still queue linked pages. */
+export function pickNext<T extends QueueLink>(links:T[],taken:Set<string>,onlyId?:string):T|'wait'|null {
+  const scope=scopeIds(links,onlyId);
+  const link=links.find(l=>(!scope||scope.has(l.id))&&!taken.has(l.id)&&['pending','scanning'].includes(l.status));
+  return link ?? (taken.size>0?'wait':null);
+}
 const Context=createContext<Engine|null>(null);
 export function useEngine(){const c=useContext(Context);if(!c)throw new Error('Missing investigation context');return c;}
 export function EngineProvider({children}:{children:ReactNode}) {
@@ -19,8 +33,9 @@ export function EngineProvider({children}:{children:ReactNode}) {
     const taken=new Set<string>(),submitted=new Set<string>(),targets=new Set<string>(),completed=new Set<string>();
     const initial=await refresh();
     const track=(data:Workspace|undefined)=>{
+      const scope=scopeIds(data?.links ?? [],onlyId);
       for(const link of data?.links ?? []) {
-        if(onlyId&&link.id!==onlyId)continue;
+        if(scope&&!scope.has(link.id))continue;
         if(['pending','scanning'].includes(link.status))targets.add(link.id);
         if(targets.has(link.id)&&!['pending','scanning'].includes(link.status))completed.add(link.id);
       }
@@ -32,7 +47,9 @@ export function EngineProvider({children}:{children:ReactNode}) {
       while(!cancel.current) {
         const data=await refresh();track(data);
         // Reservation is synchronous after the refresh: no two workers can take one ID.
-        const link=data?.links.find(l=>(!onlyId||l.id===onlyId)&&!taken.has(l.id)&&['pending','scanning'].includes(l.status));
+        // Workers stay alive while others run, so linked pages queued by a finishing scan start automatically.
+        const link=pickNext(data?.links ?? [],taken,onlyId);
+        if(link==='wait'){await wait(1500);continue;}
         if(!link)return;
         taken.add(link.id);
         let waiting=false;
@@ -62,7 +79,7 @@ export function EngineProvider({children}:{children:ReactNode}) {
         }
       }
     }
-    const workers=await Promise.allSettled(Array.from({length:onlyId?1:5},()=>worker()));
+    const workers=await Promise.allSettled(Array.from({length:5},()=>worker()));
     for(const result of workers)if(result.status==='rejected')errors.push(result.reason);
     if(errors.length)throw errors[0];
   }

@@ -43,3 +43,21 @@ describe('Service words, inherited suspicion and payment words',()=>{
  it('payment words give 20 without the AI flag',()=>{const r=score({evidenceText:['تعبئة رصيد سالك']});expect(r.signals['sensitive_request']).toBe(20);expect(score({evidenceText:['Top up your card']}).score).toBe(20);expect(score({evidenceText:['define the route']}).score).toBe(0);});
  it('does not queue official destinations in chains',()=>expect(chainDestinations(['https://ds.sharjah.ae','https://apps.apple.com/x','https://rtaservic.com'],[rta],0)).toEqual(['https://rtaservic.com/']));
 });
+import {nearSpelling,officialDestination} from '@/lib/sayyad/rules';
+import {pickNext} from '@/components/sayyad/engine-context';
+describe('One official list, near spelling and linked-page queue',()=>{
+ it('does not match rak.ae to RTA',()=>{expect(similarityEntity('https://rak.ae',[rta])).toBeNull();expect(nearSpelling('rak.ae','rta.ae')).toBe(false);});
+ it('matches rtaa.ae to RTA',()=>expect(similarityEntity('https://rtaa.ae',[rta])?.name_en).toBe('RTA Dubai'));
+ it('treats bls.rak.ae as official public service',()=>expect(officialDestination('bls.rak.ae',[rta])?.reason).toBe('موقع حكومي أو خدمة عامة معروفة'));
+ it('classifies wixstudio.com as wix',()=>expect(platformFor('onlinesalik4.wixstudio.com')).toBe('wix'));
+ it('queues and scans a manual check child pages without a separate resume',()=>{
+  const links=[{id:'p',status:'scanning',parent_link_id:null},{id:'x',status:'pending',parent_link_id:null}];
+  const taken=new Set(['p']);
+  expect(pickNext(links,taken,'p')).toBe('wait');
+  const after=[{id:'p',status:'done',parent_link_id:null},{id:'c',status:'pending',parent_link_id:'p'},{id:'g',status:'pending',parent_link_id:'c'},{id:'x',status:'pending',parent_link_id:null}];
+  const t=new Set<string>();const c=pickNext(after,t,'p');expect(c).not.toBe('wait');expect(c&&c!=='wait'?c.id:null).toBe('c');
+  t.add('c');const g=pickNext(after,t,'p');expect(g&&g!=='wait'?g.id:null).toBe('g');
+  t.add('g');expect(pickNext(after,t,'p')).toBe('wait');t.clear();t.add('c');t.add('g');
+  expect(pickNext(after.map(l=>({...l,status:'done'})),new Set(),'p')).toBeNull();
+ });
+});

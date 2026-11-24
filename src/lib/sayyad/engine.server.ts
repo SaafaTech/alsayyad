@@ -3,7 +3,7 @@ import { generateResponse } from '@lovable.dev/ai-gateway';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Tables } from '@/integrations/supabase/types';
-import { aiSchema, cleanUrl, hostname, officialMatch, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, type Entity, type ParentSuspicion } from './rules';
+import { aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, type Entity, type ParentSuspicion } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
 export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { const data=must(result);if(data===null||data===undefined)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
@@ -132,7 +132,7 @@ export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
   const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));
   if(!claimed){const current=requireData(await db.from('links').select('status').eq('id',link.id).single());return {status:current.status};}
   try {
-    const es=await entities(db),domain=hostname(link.url),official=officialMatch(domain,es);
+    const es=await entities(db),domain=hostname(link.url),official=officialDestination(domain,es);
     if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,[]);return {status:'official'} as const;}
     const platform=platformFor(domain);
     const age=await domainAge(db,domain,platform,`Bearer ${process.env['CLOUDFLARE_API_TOKEN'] ?? ''}`);
@@ -156,7 +156,7 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
   if(status>=400)return searchEvidenceAnalysis(db,link);
   const es=await entities(db);const finalUrl=cleanUrl(page.url);const finalDomain=hostname(finalUrl);const redirect=finalDomain!==hostname(link.url)?[`الرابط يحوّل إلى نطاق آخر: ${finalDomain}`]:[];
   must(await db.from('links').update({final_url:finalUrl,domain:finalDomain,platform:platformFor(finalDomain)}).eq('id',link.id));
-  const official=officialMatch(finalDomain,es);
+  const official=officialDestination(finalDomain,es);
   if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return {status:'official'} as const;}
   const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {status:'scanning'} as const;
   let domUrl=`${base}/dom/${link.scan_uuid}`;

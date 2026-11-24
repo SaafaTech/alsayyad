@@ -1,4 +1,4 @@
-import { getDomain } from 'tldts';
+import { getDomain, getPublicSuffix } from 'tldts';
 import { distance } from 'fastest-levenshtein';
 import { z } from 'zod';
 import type { Tables } from '@/integrations/supabase/types';
@@ -29,19 +29,18 @@ export function cleanUrl(raw: string): string {
 export const hostname = (url: string) => new URL(url).hostname.toLowerCase().replace(/\.$/,'');
 export const within = (domain: string, official: string) => domain===official || domain.endsWith(`.${official}`);
 const neutral=['wikipedia.org','youtube.com','gulfnews.com','khaleejtimes.com','thenationalnews.com','emaratalyoum.com','alkhaleej.ae','wam.ae','u.ae','gov.ae'];
-export function officialMatch(domain: string, entities: Entity[]) {
-  const entity=entities.find(e=>e.official_domains.some(d=>within(domain,d)));
-  if(entity) return {entity, reason:'نطاق رسمي مسجل'};
-  if(neutral.some(d=>within(domain,d))) return {entity:null, reason:'موقع معروف'};
-  return null;
-}
+const publicServices=['dubai.ae','rak.ae','sharjah.ae','shj.ae','ajman.ae','sedd.ae','ajmanded.ae','parkin.ae','evg.ae'];
+/** The single official test used on arrival, before scanning, after redirects, in chains and destinations. */
 export function officialDestination(domain: string, entities: Entity[]) {
   const d=domain.toLowerCase().replace(/\.$/,'');
-  const match=officialMatch(d,entities);
-  if(match)return match;
-  if(d.endsWith('.gov.ae')||d.endsWith('.abudhabi')||within(d,'sharjah.ae')||d==='apps.apple.com'||d==='play.google.com')return {entity:null, reason:'وجهة رسمية معروفة'};
+  const entity=entities.find(e=>e.official_domains.some(o=>within(d,o)));
+  if(entity) return {entity, reason:'نطاق رسمي مسجل'};
+  if(neutral.some(n=>within(d,n))) return {entity:null, reason:'موقع معروف'};
+  if(publicServices.some(n=>within(d,n))) return {entity:null, reason:'موقع حكومي أو خدمة عامة معروفة'};
+  if(d.endsWith('.gov.ae')||d.endsWith('.abudhabi')||d==='apps.apple.com'||d==='play.google.com') return {entity:null, reason:'وجهة رسمية معروفة'};
   return null;
 }
+export const officialMatch=officialDestination;
 const serviceWords=['serv','pay','online','fine','portal','login','update','verify','renew','card','topup','recharge','gov','uae','ae'];
 export const shortTokenServiceMatch=(host:string,token:string)=>token.length>0&&token.length<=3&&host.split('.').some(label=>label.startsWith(token)&&serviceWords.some(w=>label.slice(token.length).replace(/[-_]/g,'').startsWith(w)));
 const paymentWords=['دفع','سداد','تسديد','مخالفات','غرامة','رسوم','تعبئة رصيد','شحن رصيد','pay','payment','fine','top up','recharge'];
@@ -50,7 +49,7 @@ export function mentionsPayment(texts:(string|null|undefined)[]) {
   return paymentWords.some(w=>/^[a-z ]+$/.test(w)?new RegExp(`(^|[^a-z])${w}`).test(t):t.includes(w));
 }
 export function platformFor(domain: string) {
-  const platforms: [string,string][]=[['linktr.ee','linktree'],['wixsite.com','wix'],['wix.com','wix'],['sites.google.com','google_sites'],['pages.dev','pages_dev'],['netlify.app','netlify'],['vercel.app','vercel'],['instagram.com','instagram']];
+  const platforms: [string,string][]=[['linktr.ee','linktree'],['wixsite.com','wix'],['wixstudio.com','wix'],['wix.com','wix'],['sites.google.com','google_sites'],['pages.dev','pages_dev'],['netlify.app','netlify'],['vercel.app','vercel'],['instagram.com','instagram']];
   return platforms.find(([d])=>within(domain,d))?.[1] ?? 'other';
 }
 export const freePlatform = (platform: string)=>['linktree','wix','google_sites','pages_dev','netlify','vercel'].includes(platform);
@@ -61,12 +60,18 @@ export function normalizePhone(p: string) {
 }
 const canonicalPhone = (p:string) => {const n=normalizePhone(p);return n.startsWith('971') ? n.slice(3) : n.startsWith('0') ? n.slice(1) : n;};
 export function uaePhone(p:string) {return /^(971[234679]\d{7}|9715[024568]\d{7}|0[234679]\d{7}|05[024568]\d{7}|800\d{3,9}|600\d{6}|\d{3,4})$/.test(normalizePhone(p));}
+const tld=(d:string)=>getPublicSuffix(d,{allowPrivateDomains:false}) ?? d.split('.').pop() ?? '';
+/** Long official labels tolerate two edits; short ones only one edit on the same TLD (rak.ae is not rta.ae). */
+export function nearSpelling(candidate:string,official:string) {
+  const label=official.split('.')[0] ?? '';
+  return label.length>=6 ? distance(candidate,official)<=2 : distance(candidate,official)<=1 && tld(candidate)===tld(official);
+}
 export function similarityEntity(url: string, entities: Entity[]) {
   const h=hostname(url), path=decodeURIComponent(new URL(url).pathname).toLowerCase(), target=`${h}${path}`;
   return entities.find(e=>!e.official_domains.some(d=>within(h,d)) && (
     e.brand_keywords.some(k=>{const s=k.toLowerCase().replace(/\s+/g,'');return s.length>=4 ? target.replace(/\s+/g,'').includes(s) : target.split(/[.\/\-_]/).some(part=>part===s || part.startsWith(`${s}service`)) || shortTokenServiceMatch(h,s);}) ||
     e.official_domains.some(d=>shortTokenServiceMatch(h,d.split('.')[0] ?? '')) ||
-    e.official_domains.some(d=>target.includes(d) || distance(registrationDomain(h),d)<=2 || (d.split('.')[0]?.length ?? 0)>=4 && h.split('.').some(p=>p.includes(d.split('.')[0] ?? '\0')))
+    e.official_domains.some(d=>target.includes(d) || nearSpelling(registrationDomain(h),d) || (d.split('.')[0]?.length ?? 0)>=4 && h.split('.').some(p=>p.includes(d.split('.')[0] ?? '\0')))
   )) ?? null;
 }
 export function riskLevel(score:number): 'green'|'yellow'|'red' {return score<30?'green':score<60?'yellow':'red';}
