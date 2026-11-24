@@ -255,3 +255,6 @@ export function urlLexicalSignals(url:string,entities:Entity[],originUrl?:string
   }
   return out;
 }
+
+/** Serper language: "en" when the phrase is mostly Latin letters, otherwise "ar" (gl stays "ae"). */
+export function searchLanguage(phrase:string):'ar'|'en'{const latin=(phrase.match(/[a-z]/gi) ?? []).length,arabic=(phrase.match(/[\u0600-\u06FF]/g) ?? []).length;return latin>arabic?'en':'ar';}

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseWhois, ctDomains, ctTitle } from './early';
 import type { Database, Tables } from '@/integrations/supabase/types';
-import { aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, isRemovedPage, unverifiedFallback, scamTypes, isShortener, neutralAi, shortenerReason, shortenerUnresolvedReason, type AiFinding, type Entity, type ParentSuspicion } from './rules';
+import { aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, isRemovedPage, unverifiedFallback, scamTypes, isShortener, neutralAi, searchLanguage, shortenerReason, shortenerUnresolvedReason, type AiFinding, type Entity, type ParentSuspicion } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
 export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { const data=must(result);if(data===null||data===undefined)throw new Error('لم توجد بيانات التحقيق المطلوبة');return data; }
@@ -15,7 +15,7 @@ export async function providerFetch(url:string,init:RequestInit={},rdapOrigins:s
     u.hostname==='google.serper.dev' || u.hostname==='api.cloudflare.com' || u.hostname==='crt.sh' ||
     (u.hostname==='data.iana.org' && u.pathname==='/rdap/dns.json') || u.hostname==='rdap.verisign.com' || rdapOrigins.includes(u.origin));
   if(!permitted)throw new Error('تم منع اتصال غير مسموح');
-  const response=await fetch(url,{...init,redirect:'manual',signal:init.signal ?? AbortSignal.timeout(u.hostname==='crt.sh'||u.hostname==='rdap.verisign.com'||rdapOrigins.includes(u.origin)?7000:20000)});
+  const response=await fetch(url,{...init,redirect:'manual',signal:init.signal ?? AbortSignal.timeout(u.hostname==='crt.sh'?20000:u.hostname==='rdap.verisign.com'||rdapOrigins.includes(u.origin)?7000:20000)});
   if(u.hostname==='api.cloudflare.com' && (init.method ?? 'GET')==='GET')console.info(`Cloudflare ${u.pathname.split('/').at(-2)} HTTP ${response.status}`);
   return response;
 }
@@ -56,7 +56,7 @@ export async function officialAnalysis(db:Db,id:string,reason:string,entityId:st
 }
 const serperSchema=z.object({organic:z.array(z.object({link:z.string(),title:z.string().optional(),snippet:z.string().optional(),position:z.number().optional()})).optional(), ads:z.array(z.object({link:z.string().optional(),url:z.string().optional(),title:z.string().optional(),snippet:z.string().optional(),position:z.number().optional()})).optional(),places:z.array(z.object({website:z.string().optional(),phoneNumber:z.string().optional(),title:z.string().optional(),position:z.number().optional()})).optional()});
 export async function search(db:Db,userId:string,phrase:string,source:'google'|'maps',key:string) {
-  const res=await providerFetch(`https://google.serper.dev/${source==='google'?'search':'maps'}`,{method:'POST',headers:{'X-API-KEY':key,'Content-Type':'application/json'},body:JSON.stringify({q:phrase,gl:'ae',hl:'ar',...(source==='google'?{num:10}:{})})});
+  const res=await providerFetch(`https://google.serper.dev/${source==='google'?'search':'maps'}`,{method:'POST',headers:{'X-API-KEY':key,'Content-Type':'application/json'},body:JSON.stringify({q:phrase,gl:'ae',hl:searchLanguage(phrase),...(source==='google'?{num:10}:{})})});
   if(!res.ok)throw new Error('تعذر البحث عبر Serper؛ تحقق من الإعدادات والرصيد');
   const result=serperSchema.parse(await res.json());const es=await entities(db);
   const hunt=requireData(await db.from('hunts').insert({phrase,source,created_by:userId}).select('*').single());

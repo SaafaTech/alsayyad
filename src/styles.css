@@ -136,3 +136,11 @@ html.light .topbar{background:#FFFFFF}html.light .risk.red{color:var(--r-red);ba
 .review-mark{font-size:11px;font-weight:700;margin-inline-start:6px}.review-mark.ok{color:var(--success)}.review-mark.bad{color:var(--destructive)}
 .matrix{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-width:520px}.matrix>div{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--card)}.matrix strong{font-size:24px;display:block}
 .splash-seen .splash-pending{display:none}
+/* Splash layout: radar sits in the upper area, wordmark + tagline are anchored below the outer ring (r=220px × scale) with a fixed gap. */
+.splash-radar{inset:0 0 200px 0}
+.splash-brand{position:absolute;left:0;right:0;margin-top:0;top:calc((100% - 200px) / 2 + 252px)}
+@media (max-height:720px){.splash-radar>*{scale:.8}.splash-brand{top:calc((100% - 200px) / 2 + 232px)}}
+.splash.is-static .splash-brand{position:relative;top:auto}
+.lang-toggle{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:3px 10px;white-space:nowrap}
+.lang-toggle button{padding:2px 4px;border-radius:4px}
+.lang-toggle button.active{color:var(--primary);font-weight:600}
