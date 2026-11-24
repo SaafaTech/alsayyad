@@ -217,3 +217,4 @@ html[dir="ltr"] .ind-link-text{text-align:left}
 .c-summary dd{font-size:14px;font-weight:500;overflow-wrap:anywhere}
 .c-summary dl+div{gap:12px!important;margin-top:16px!important}
 .c-summary dl+div>*{width:100%}
+.result-row.last-opened{--row-accent:var(--primary)!important}
