@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { RiskBadge } from '@/components/sayyad/common';
+import { RiskBadge, needsReview } from '@/components/sayyad/common';
 import { meta, ProgressCard } from '@/components/sayyad/common';
 import { useEngine } from '@/components/sayyad/engine-context';
 import { supabase } from '@/integrations/supabase/client';
@@ -71,7 +71,7 @@ function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
   const latest=batch ?? [...rows].reverse().find(r=>r.batch?.startsWith('قائمة ملصوقة'))?.batch ?? null;
   const mine=rows.filter(r=>latest&&r.batch===latest);
   const result=mine.map(r=>{const a=r.link_id?engine.data?.analyses.find(x=>x.link_id===r.link_id):undefined,l=r.link_id?engine.data?.links.find(x=>x.id===r.link_id):undefined;const lv=r.excluded_reason?'excluded':r.link_id?level(r.link_id):null;
-    return {id:r.id,url:r.url,level:lv,score:a?.score ?? null,top_reason:r.excluded_reason ?? tr(a?.reasons_ar[0]) ?? l?.scan_error ?? null,final_url:l?.final_url ?? null,status:l?.status ?? null};});
+    return {id:r.id,url:r.url,level:lv,score:a?.score ?? null,signals:a?.signals,top_reason:r.excluded_reason ?? tr(a?.reasons_ar[0]) ?? l?.scan_error ?? null,final_url:l?.final_url ?? null,status:l?.status ?? null};});
   const done=result.filter(r=>r.level&&r.level!=='excluded').length,total=result.filter(r=>r.level!=='excluded').length;
   const lines=text.split(/\r?\n/).filter(l=>l.trim()).length;
   async function submit(){setBusy(true);try{
@@ -85,7 +85,7 @@ function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
     await qc.invalidateQueries({queryKey:['expert-links']});void engine.resume();
   }catch(e){toast.error(e instanceof Error?e.message:tr("تعذر استيراد القائمة"));}finally{setBusy(false);}}
   function exportCsv(){const blob=new Blob(['\uFEFF'+resultsCsv(result)],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sayyad-results.csv';a.click();URL.revokeObjectURL(a.href);}
-  const word=(l:string|null)=>l==='red'?tr("خطر"):l==='yellow'?tr("مشبوه"):l==='green'?tr("آمن"):l==='removed'?tr("محذوفة"):l==='failed'?tr("تعذر الفحص"):l==='excluded'?tr("مستبعد"):tr("بالانتظار");
+  const word=(l:string|null,score:number|null=null,signals?:unknown)=>l==='red'?tr("خطر"):l==='yellow'?(needsReview({level:'yellow',score:score ?? 0,signals})?tr("تحتاج مراجعة"):tr("مشبوه")):l==='green'?tr("آمن"):l==='removed'?tr("محذوفة"):l==='failed'?tr("تعذر الفحص"):l==='excluded'?tr("مستبعد"):tr("بالانتظار");
   return <section className="analysis-section mb-6"><h2>{tr("فحص قائمة روابط")}</h2>
     <p className="text-xs text-muted-foreground mb-2">{tr("رابط في كل سطر (يُقبل الشكل المعطّل مثل hxxps://site[.]com)، ويمكن إضافة فاصلة ثم fraud أو legit. الحد 500 رابط.")}</p>
     <Textarea dir="ltr" rows={6} className="mono text-start" spellCheck={false} value={text} onChange={e=>setText(e.target.value)} placeholder={'hxxps://example[.]com/pay,fraud\nhttps://example.org,legit'}/>
@@ -94,6 +94,6 @@ function PasteBatch({rows,level}:{rows:Row[];level:(id:string)=>string|null}){
       <div className="h-2 rounded bg-muted overflow-hidden mb-3"><div className="h-full bg-primary transition-all" style={{width:`${total?Math.round(done*100/total):0}%`}}/></div>
       <ProgressCard job={engine.job} running={engine.running} onStop={engine.stop}/>
       <div className="overflow-x-auto mt-3"><table className="w-full text-xs"><thead><tr className="text-muted-foreground"><th className="text-start p-1">{tr("الرابط")}</th><th className="text-start p-1">{tr("الحكم")}</th><th className="text-start p-1">{tr("السبب الرئيسي")}</th><th className="text-start p-1">{tr("الوجهة النهائية")}</th></tr></thead>
-      <tbody>{result.map(r=><tr key={r.id} className="border-t border-border"><td dir="ltr" className="p-1 text-start break-all mono">{defangUrl(r.url)}</td><td className="p-1 whitespace-nowrap">{r.level==='red'||r.level==='yellow'||r.level==='green'?<RiskBadge level={r.level} score={r.score ?? 0}/>:word(r.level)}</td><td className="p-1">{r.top_reason ?? '—'}</td><td dir="ltr" className="p-1 text-start break-all mono">{r.final_url&&r.final_url!==r.url?defangUrl(r.final_url):'—'}</td></tr>)}</tbody></table></div></div>}
+      <tbody>{result.map(r=><tr key={r.id} className="border-t border-border"><td dir="ltr" className="p-1 text-start break-all mono">{defangUrl(r.url)}</td><td className="p-1 whitespace-nowrap">{r.level==='red'||r.level==='yellow'||r.level==='green'?<RiskBadge level={r.level} score={r.score ?? 0} signals={r.signals}/>:word(r.level,r.score,r.signals)}</td><td className="p-1">{r.top_reason ?? '—'}</td><td dir="ltr" className="p-1 text-start break-all mono">{r.final_url&&r.final_url!==r.url?defangUrl(r.final_url):'—'}</td></tr>)}</tbody></table></div></div>}
   </section>;
 }

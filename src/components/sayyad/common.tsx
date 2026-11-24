@@ -12,8 +12,11 @@ import { EngineProvider, etaSeconds, type Job } from './engine-context';
 export const meta=(title:string,description:string)=>({meta:[{title:tf("{0} | الصيّاد Sayyad",title)},{name:'description',content:description},{property:'og:title',content:tf("{0} | الصيّاد Sayyad",title)},{property:'og:description',content:description},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]});
 export function Brand(){return <div className="flex items-center gap-2 whitespace-nowrap"><Wordmark size="sm"/><span className="text-sm text-primary/70" dir="ltr">| Sayyad</span></div>;}
 export const removedSignal=(signals:unknown)=>!!signals&&typeof signals==='object'&&(signals as Record<string,unknown>)['removed']===true;
-export function RiskBadge({score,level,status,removed}:{score?:number;level?:string;status?:string;removed?:boolean}) {
+/** A yellow verdict the engine could not fully verify (or a yellow with no evidence points) is "needs review", never a score. */
+export const needsReview=(a:{level?:string|undefined;score?:number|undefined;signals?:unknown}|undefined)=>!!a&&!removedSignal(a.signals)&&a.level==='yellow'&&(!!a.signals&&typeof a.signals==='object'&&(a.signals as Record<string,unknown>)['unverified']===true||a.score===0);
+export function RiskBadge({score,level,status,removed,signals}:{score?:number;level?:string;status?:string;removed?:boolean;signals?:unknown}) {
   if(removed||status==='removed')return <span className="risk unknown"><AlertTriangle size={14}/>{tr("محذوفة")}</span>;
+  if(needsReview({score,level,signals}))return <span className="risk yellow"><AlertTriangle size={14}/><span>{tr("تحتاج مراجعة")}</span></span>;
   if(score===undefined&&(status==='unscannable'||status==='error'))return <span className="risk unknown"><AlertTriangle size={14}/>{status==='unscannable'?tr("غير قابل للفحص"):tr("تعذر التحليل")} —</span>;
   if(score===undefined)return <span className="risk pending"><Radar size={14}/>{status==='scanning'?tr("جارٍ الفحص"):tr("بانتظار الفحص")} —</span>;
   const Icon=level==='red'?ShieldAlert:level==='yellow'?AlertTriangle:ShieldCheck;
