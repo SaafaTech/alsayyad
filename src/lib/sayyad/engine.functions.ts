@@ -1,3 +1,4 @@
+import { requireInvestigator } from './role.server';
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
@@ -10,17 +11,17 @@ export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupa
   const [es,phrases,links,analyses,hunts]=await Promise.all([db.from('entities').select('*').order('name_ar'),db.from('search_phrases').select('*').eq('active',true),db.from('links').select('*').order('first_seen_at',{ascending:false}),db.from('analyses').select('*'),db.from('hunts').select('*').order('created_at',{ascending:false})]);
   return {entities:requireData(es),phrases:requireData(phrases),links:requireData(links),analyses:requireData(analyses),hunts:requireData(hunts)};
 });
-export const searchGoogle=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'google',key);});
-export const searchMaps=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'maps',key);});
-export const ctWatch=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({keyword:z.string().trim().regex(/^[a-z0-9]{4,40}$/)})).handler(async({data,context})=>ctWatchCore(context.supabase,context.userId,data.keyword));
-export const addManualLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({url:z.string().min(1).max(2048)})).handler(async({data,context})=>{
+export const searchGoogle=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'google',key);});
+export const searchMaps=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(phraseSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);const key=process.env['SERPER_API_KEY'];if(!key)throw new Error('أضف SERPER_API_KEY في إعدادات الأسرار');return search(context.supabase,context.userId,data.phrase,'maps',key);});
+export const ctWatch=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({keyword:z.string().trim().regex(/^[a-z0-9]{4,40}$/)})).handler(async({data,context})=>(await requireInvestigator(context.supabase,context.userId),ctWatchCore(context.supabase,context.userId,data.keyword)));
+export const addManualLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({url:z.string().min(1).max(2048)})).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
   const url=cleanUrl(data.url);const db=context.supabase;
   const existing=must(await db.from('links').select('*').eq('url',url).maybeSingle());if(existing)return existing;
   const hunt=requireData(await db.from('hunts').insert({phrase:'تحقق من رابط',source:'manual',results_count:1,created_by:context.userId}).select('*').single());
   const link=await addLink(db,{url,hunt_id:hunt.id},await entities(db));if(!link)throw new Error('الرابط غير صالح');return link;
 });
 // Start once, poll from the browser: no 90-second server sleep loop.
-export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{
+export const scanLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const db=context.supabase;const link=requireData(await db.from('links').select('*').eq('id',data.link_id).single());
   if(link.status!=='pending')return {started:false,status:link.status};
@@ -59,10 +60,10 @@ async function pollScanCore(data:{link_id:string},context:{supabase:Db}){
   try{if(!r.ok)throw new Error('تعذر قراءة تقرير Cloudflare');const raw:unknown=await r.json();logReportOnce(link.id,raw);const report=parseReport(raw);const state=reportState(report,link.scan_started_at);console.info(`Cloudflare task ${report.task?.status ?? 'unspecified'}; report ${state}`);if(state==='scanning')return {status:'scanning'};if(state==='unscannable')return searchEvidenceAnalysis(db,link);return await finalize(db,link,report,cfBase(account),cfGetHeaders(token));}
   catch(e){must(await db.from('links').update({status:'error',scan_error:e instanceof Error?e.message:'تعذر إكمال التحليل'}).eq('id',link.id));throw new Error('تعذر إكمال التحليل؛ لم يُصنّف الرابط على أنه آمن');}
 }
-export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{const result=await pollScanCore(data,context);if(result.status==='done')await maybeRebuildCampaigns(context.supabase);return result;});
+export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);const result=await pollScanCore(data,context);if(result.status==='done')await maybeRebuildCampaigns(context.supabase);return result;});
 // Archive the latest analysis, return the link and its direct children to the normal queue.
 export const rescanLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>({count:must(await context.supabase.rpc('rescan_link',{_link_id:data.link_id}))}));
-export const screenshotProxy=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{
+export const screenshotProxy=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const link=requireData(await context.supabase.from('links').select('scan_uuid,status').eq('id',data.link_id).single());if(!link.scan_uuid||!['done','official'].includes(link.status))return null;
   const r=await providerFetch(`${cfBase(account)}/screenshots/${link.scan_uuid}.png`,{headers:cfGetHeaders(token)});if(!r.ok)return null;

@@ -1,3 +1,4 @@
+import { requireInvestigator } from './role.server';
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
@@ -17,7 +18,7 @@ export const getEvidence=createServerFn({method:'GET'}).middleware([requireSupab
   return {evidence:ev,custody:log.map(l=>({...l,by_system:l.actor===null}))};
 });
 // Creation runs with service privileges only after the caller's own session proves the link qualifies.
-export const createEvidence=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{
+export const createEvidence=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
   const db=context.supabase;
   const existing=must(await db.from('evidence').select('id').eq('link_id',data.link_id).maybeSingle());if(existing)return {id:existing.id,created:false};
   const link=requireData(await db.from('links').select('*').eq('id',data.link_id).single());
@@ -53,7 +54,7 @@ export const createEvidence=createServerFn({method:'POST'}).middleware([requireS
 });
 const logAction=async(db:SupabaseClient<Database>,evidence_id:string,action:'viewed'|'exported_pdf'|'downloaded_original'|'reviewed'|'status_changed'|'notes_updated',detail:string|null,userId:string)=>must(await db.from('custody_log').insert({evidence_id,action,actor:userId,detail}));
 export const logEvidenceAction=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({evidence_id:z.string().uuid(),action:z.enum(['viewed','exported_pdf'])})).handler(async({data,context})=>{await logAction(context.supabase,data.evidence_id,data.action,null,context.userId);return true;});
-export const screenshotUrl=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({evidence_id:z.string().uuid(),download:z.boolean()})).handler(async({data,context})=>{
+export const screenshotUrl=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({evidence_id:z.string().uuid(),download:z.boolean()})).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
   const ev=requireData(await context.supabase.from('evidence').select('id,case_no,screenshot_path').eq('id',data.evidence_id).single());
   if(!ev.screenshot_path)return null;
   const { supabaseAdmin }=await import('@/integrations/supabase/client.server');

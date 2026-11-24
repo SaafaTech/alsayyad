@@ -1,10 +1,11 @@
+import { requireInvestigator } from './role.server';
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { requireData, must, addLink, entities } from './engine.server';
 import { sampleUrl } from './expert';
 /** Queue chosen expert rows (caller's own rows only, by RLS) as one expert_sample hunt. */
-export const scanExpertSample=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({ids:z.array(z.string().uuid()).min(1).max(1000)})).handler(async({data,context})=>{
+export const scanExpertSample=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(z.object({ids:z.array(z.string().uuid()).min(1).max(1000)})).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
   const db=context.supabase;
   const rows=requireData(await db.from('expert_links').select('id,url,excluded_reason,link_id').in('id',data.ids).eq('created_by',context.userId)).filter(r=>!r.excluded_reason&&!r.link_id);
   if(!rows.length)return {queued:0};

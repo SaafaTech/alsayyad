@@ -1,3 +1,4 @@
+import { requireInvestigator } from './role.server';
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { requireData } from './engine.server';
@@ -6,4 +7,4 @@ export const listCampaigns=createServerFn({method:'GET'}).middleware([requireSup
   const db=context.supabase;const [c,l]=await Promise.all([db.from('campaigns').select('*').order('link_count',{ascending:false}),db.from('campaign_links').select('*')]);
   return {campaigns:requireData(c),links:requireData(l)};
 });
-export const rebuildCampaigns=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).handler(async()=>({count:await rebuildCampaignsNow()}));
+export const rebuildCampaigns=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).handler(async({context})=>{await requireInvestigator(context.supabase,context.userId);return {count:await rebuildCampaignsNow()};});
