@@ -63,5 +63,8 @@ describe('follow-up stats and export',()=>{
   const analyses=[{link_id:'a',created_at:'2026-11-24T06:00:00Z',signals:{removed:true},level:'yellow'},{link_id:'b',created_at:'2026-11-24T02:00:00Z',signals:{removed:true},level:'yellow'},{link_id:'c',created_at:'2026-11-24T01:00:00Z',signals:{},level:'red'}];
   it('counts removed links that were red/yellow before and averages hours',()=>expect(takedownStats(links,analyses,[{link_id:'a',analysis:{level:'red'}},{link_id:'b',analysis:{level:'green'}}])).toEqual({stopped:1,avgHours:6}));
   it('counts red/yellow links first found by CT, not removed ones',()=>expect(ctEarlyCount(links,analyses,[{id:'h1',source:'ct'},{id:'h2',source:'google'}])).toBe(1));
-  it('exports cases with defanged URLs and yes/no removed',()=>expect(casesCsv([{case_no:'SAY-2026-0001',url:'https://a.example.com',final_url:null,entity:'Koala',level:'red',score:80,top_reasons:['x','y'],first_seen:null,captured_at:null,sha256:'ab',case_status:'detected',removed:true}]).split('\n')[1]).toBe('SAY-2026-0001,hxxps://a[.]example[.]com,,Koala,red,80,x | y,,,ab,detected,yes'));
+  it('exports cases with defanged URLs, yes/no removed and urgent value',()=>{
+    expect(casesCsv([{case_no:'SAY-2026-0001',url:'https://a.example.com',final_url:null,entity:'Koala',level:'red',score:80,top_reasons:['x','y'],first_seen:null,captured_at:null,sha256:'ab',case_status:'detected',removed:true,urgent:'yes'}]).split('\n')[1]).toBe('SAY-2026-0001,hxxps://a[.]example[.]com,,Koala,red,80,x | y,,,ab,detected,yes,yes');
+    expect(casesCsv([{case_no:'SAY-2026-0002',url:'https://b.example.com',final_url:null,entity:null,level:'yellow',score:40,top_reasons:[],first_seen:null,captured_at:null,sha256:null,case_status:'detected',removed:false,urgent:'unknown'}]).split('\n')[1]).toBe('SAY-2026-0002,hxxps://b[.]example[.]com,,,yellow,40,,,,,detected,no,unknown');
+  });
 });

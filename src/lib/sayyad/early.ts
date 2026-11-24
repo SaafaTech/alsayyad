@@ -86,10 +86,10 @@ export function ctEarlyCount(links:Pick<Tables<'links'>,'id'|'hunt_id'|'status'>
   return links.filter(l=>{const a=byLink.get(l.id);return l.hunt_id&&ct.has(l.hunt_id)&&l.status!=='removed'&&a&&rec(a.signals)['removed']!==true&&(a.level==='red'||a.level==='yellow');}).length;
 }
 
-export type CaseRow={case_no:string;url:string;final_url:string|null;entity:string|null;level:string;score:number;top_reasons:string[];first_seen:string|null;captured_at:string|null;sha256:string|null;case_status:string;removed:boolean};
+export type CaseRow={case_no:string;url:string;final_url:string|null;entity:string|null;level:string;score:number;top_reasons:string[];first_seen:string|null;captured_at:string|null;sha256:string|null;case_status:string;removed:boolean;urgent:'yes'|'no'|'unknown'};
 const cell=(v:unknown)=>{const s=v===null||v===undefined?'':String(v);return /[",\n\r]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;};
 export function casesCsv(rows:CaseRow[]){
-  const cols=['case_no','url','final_url','entity','level','score','top_reasons','first_seen','captured_at','sha256','case_status','removed'] as const;
+  const cols=['case_no','url','final_url','entity','level','score','top_reasons','first_seen','captured_at','sha256','case_status','removed','urgent'] as const;
   return [cols.join(','),...rows.map(r=>cols.map(c=>c==='url'?cell(defangUrl(r.url)):c==='final_url'?cell(r.final_url?defangUrl(r.final_url):''):c==='top_reasons'?cell(r.top_reasons.join(' | ')):c==='removed'?(r.removed?'yes':'no'):cell(r[c])).join(','))].join('\n');
 }
 export const casesJson=(rows:CaseRow[])=>JSON.stringify(rows.map(r=>({...r,url:defangUrl(r.url),final_url:r.final_url?defangUrl(r.final_url):null,removed:r.removed?'yes':'no'})),null,2);
