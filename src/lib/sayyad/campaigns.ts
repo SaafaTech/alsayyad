@@ -1,6 +1,6 @@
 import { getPublicSuffix } from 'tldts';
 import type { Tables } from '@/integrations/supabase/types';
-import { normalizePhone, registrationDomain } from './rules';
+import { normalizePhone, registrationDomain, freePlatform } from './rules';
 type Link=Pick<Tables<'links'>,'id'|'url'|'domain'|'platform'|'parent_link_id'|'maps_phone'|'first_seen_at'|'hunt_id'>;
 type Analysis=Pick<Tables<'analyses'>,'link_id'|'level'|'phones_found'|'hosting'|'page_title'|'impersonated_entity_id'|'created_at'>;
 type Entity=Pick<Tables<'entities'>,'id'|'name_ar'|'official_phones'|'official_domains'>;
@@ -48,7 +48,8 @@ export function clusterCampaigns(input:{links:Link[];analyses:Analysis[];entitie
     if(x.l.parent_link_id===y.l.id||y.l.parent_link_id===x.l.id||x.root===y.root)join(i,j,R.chain);
     for(const p of x.phones)if(y.phones.has(p))join(i,j,phoneReason(p));
     const sameEntity=!!x.a.impersonated_entity_id&&x.a.impersonated_entity_id===y.a.impersonated_entity_id;
-    if((x.ip&&x.ip===y.ip)||(x.asn&&x.asn===y.asn&&sameEntity))join(i,j,R.host);
+    const shared=freePlatform(x.l.platform)||freePlatform(y.l.platform);
+    if(shared?(sameEntity&&((x.ip&&x.ip===y.ip)||(x.asn&&x.asn===y.asn))):((x.ip&&x.ip===y.ip)||(x.asn&&x.asn===y.asn&&sameEntity)))join(i,j,R.host);
     if(x.title&&x.title===y.title&&sameEntity)join(i,j,R.title);
     if(x.name&&x.name===y.name)join(i,j,R.name);
   }
@@ -69,6 +70,6 @@ export function awarenessMessage(entity:Entity|null|undefined,domains:string[]){
   const parts=[`تحذير: رصدنا مواقع احتيالية تنتحل ${entity?.name_ar ?? 'جهات رسمية'}. لا تدخل بيانات بطاقتك أو حسابك فيها: ${domains.slice(0,5).map(defangDomain).join('، ')}.`];
   if(entity?.official_domains[0])parts.push(`الموقع الرسمي الوحيد: ${entity.official_domains[0]}.`);
   if(entity?.official_phones[0])parts.push(`للتواصل الرسمي: ${entity.official_phones[0]}.`);
-  parts.push('أبلغ عن أي رابط مشبوه عبر منصة eCrime أو اتصل 999.');
+  parts.push('للإبلاغ: خدمة أمان من شرطة أبوظبي على 8002626 أو رسالة نصية إلى 2828.');
   return parts.join(' ');
 }
