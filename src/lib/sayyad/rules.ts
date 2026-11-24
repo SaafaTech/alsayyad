@@ -10,6 +10,7 @@ export const aiSchema = z.object({
   scam_type: z.enum(['none','unlicensed_domestic_workers','fund_recovery','fake_insurance','fake_shop_payment','fake_job','fake_investment','fake_real_estate','too_good_price']).optional(),
   scam_confidence: z.number().min(0).max(1).optional(),
   visual_brand_match: z.boolean().optional(), visual_brand_entity: z.string().nullable().optional(),
+  other_brand: z.string().max(80).nullable().optional(), other_brand_official_domain: z.string().max(120).nullable().optional(), other_brand_confidence: z.number().min(0).max(1).optional(),
   bank_accounts: z.array(z.object({iban:z.string().nullable(),account:z.string().nullable(),bank:z.string().nullable()})).max(10).optional(),
 });
 /** Neutral AI finding used when no page or search evidence exists (lexical-only verdicts). */
@@ -150,6 +151,9 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   if(named && input.ai.impersonation_confidence>=0.6 && !named.official_domains.some(d=>within(domain,d))) add('impersonation',35,`ينتحل هوية ${named.name_ar} بثقة ${Math.round(input.ai.impersonation_confidence*100)}٪ على نطاق غير رسمي`);
   // Visual imitation counts inside the impersonation signal (no new weight).
   if(visual){if(input.ai.impersonation_confidence>=0.5){const r=`الصفحة تقلّد شكل ${visual.name_ar} (الشعار/الألوان)`;if(signals['impersonation']===undefined)add('impersonation',35,r);else reasons.push(r);}else reasons.push(`الصفحة تشبه شكل ${visual.name_ar} — لم يؤكد التحليل الانتحال`);}
+  // Generic phishing: a well-known brand outside the registry, never double counted with entity impersonation.
+  const ob=input.ai.other_brand?.trim(),obDomain=input.ai.other_brand_official_domain?.trim().toLowerCase().replace(/^www\./,'');
+  if(signals['impersonation']===undefined&&ob&&obDomain&&(input.ai.other_brand_confidence ?? 0)>=0.7&&!within(domain,obDomain)) add('impersonation',35,`ينتحل علامة معروفة: ${ob} على نطاق غير رسمي`);
   const embedded=lexical.find(l=>l.key==='similarity'&&l.embedded);
   if(similar) add('similarity',30,embedded?`${embedded.reason}: ${domain}`:`يحمل اسم ${similar.name_ar} على نطاق غير رسمي: ${domain}`);
   // URL-only signals never double count a key already scored above.
@@ -175,6 +179,8 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
     reasons.push('يحمل اسم وشكل الجهة بدون طلب دفع أو بيانات — قد يكون وكيلاً أو فرعاً رسمياً، يحتاج تحقق');
     signals['brand_only_cap']=true;
   }
+  // Floor: credential/payment requests on an unofficial, unknown domain always need review.
+  if((input.ai.asks_sensitive_data||input.ai.asks_payment_or_card)&&!officialDestination(domain,input.entities)&&score<30){score=30;reasons.push('يطلب بيانات دخول أو دفع على نطاق غير رسمي — يحتاج مراجعة');signals['sensitive_floor']=true;}
   score=Math.min(100,score);signals['confidence']=input.ai.impersonation_confidence;signals['scam_type']=scam;signals['scam_confidence']=scamConf;signals['lexical']=lexPoints;if(input.ai.visual_brand_match!==undefined){signals['visual_brand_match']=input.ai.visual_brand_match;signals['visual_brand_entity']=input.ai.visual_brand_entity ?? null;}
   return {score,level:riskLevel(score),reasons_ar:reasons.length?reasons:['لا توجد علامات انتحال في الأدلة المتاحة'],signals,entity,phones};
 }
