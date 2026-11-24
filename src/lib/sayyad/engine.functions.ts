@@ -2,7 +2,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
 import { linkIdSchema, phraseSchema, cleanUrl, scanSubmissionSchema, officialMatch, hostname } from './rules';
-import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, reportState, markUnscannable, finalize, officialAnalysis } from './engine.server';
+import { must, requireData, search, addLink, entities, cfBase, cfHeaders, cfGetHeaders, providerFetch, parseReport, logReportOnce, reportState, searchEvidenceAnalysis, finalize, officialAnalysis } from './engine.server';
 export const getWorkspace=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
   const db=context.supabase;
   const [es,phrases,links,analyses,hunts]=await Promise.all([db.from('entities').select('*').order('name_ar'),db.from('search_phrases').select('*').eq('active',true),db.from('links').select('*').order('first_seen_at',{ascending:false}),db.from('analyses').select('*'),db.from('hunts').select('*').order('created_at',{ascending:false})]);
@@ -34,11 +34,11 @@ export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabas
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const db=context.supabase;const link=requireData(await db.from('links').select('*').eq('id',data.link_id).single());
   if(link.status!=='scanning')return {status:link.status};
-  if(!link.scan_uuid){if(reportState(parseReport({}),link.scan_started_at)==='unscannable')return markUnscannable(db,link.id);return {status:'scanning'};}
+  if(!link.scan_uuid){if(reportState(parseReport({}),link.scan_started_at)==='unscannable')return searchEvidenceAnalysis(db,link);return {status:'scanning'};}
   if(link.processing_started_at){if(Date.now()-Date.parse(link.processing_started_at)>180000){must(await db.from('links').update({status:'error',scan_error:'لم يكتمل التحليل؛ لن يُعاد طلب الذكاء الاصطناعي تلقائياً'}).eq('id',link.id));return {status:'error'};}return {status:'scanning'};}
   const r=await providerFetch(`${cfBase(account)}/result/${link.scan_uuid}`,{headers:cfGetHeaders(token)});
-  if(r.status===404){if(reportState(parseReport({}),link.scan_started_at)==='scanning')return {status:'scanning'};return markUnscannable(db,link.id);}
-  try{if(!r.ok)throw new Error('تعذر قراءة تقرير Cloudflare');const report=parseReport(await r.json());const state=reportState(report,link.scan_started_at);console.info(`Cloudflare task ${report.task?.status ?? 'unspecified'}; report ${state}`);if(state==='scanning')return {status:'scanning'};if(state==='unscannable')return markUnscannable(db,link.id);const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {status:'scanning'};return await finalize(db,link,report,cfBase(account),cfGetHeaders(token));}
+  if(r.status===404){if(reportState(parseReport({}),link.scan_started_at)==='scanning')return {status:'scanning'};return searchEvidenceAnalysis(db,link);}
+  try{if(!r.ok)throw new Error('تعذر قراءة تقرير Cloudflare');const raw:unknown=await r.json();logReportOnce(link.id,raw);const report=parseReport(raw);const state=reportState(report,link.scan_started_at);console.info(`Cloudflare task ${report.task?.status ?? 'unspecified'}; report ${state}`);if(state==='scanning')return {status:'scanning'};if(state==='unscannable')return searchEvidenceAnalysis(db,link);return await finalize(db,link,report,cfBase(account),cfGetHeaders(token));}
   catch(e){must(await db.from('links').update({status:'error',scan_error:e instanceof Error?e.message:'تعذر إكمال التحليل'}).eq('id',link.id));throw new Error('تعذر إكمال التحليل؛ لم يُصنّف الرابط على أنه آمن');}
 });
 export const screenshotProxy=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{

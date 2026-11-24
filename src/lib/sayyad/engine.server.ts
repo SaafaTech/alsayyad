@@ -79,34 +79,62 @@ export async function aiAnalyze(input:{url:string;final_url:string;page_title:st
   return aiSchema.parse(JSON.parse(call.arguments));
 }
 const reportString=z.string().optional().catch(undefined);
-const reportSchema=z.object({page:z.object({url:reportString,title:reportString,text:reportString,status:z.union([z.string(),z.number()]).optional().catch(undefined)}).optional().catch(undefined),task:z.object({status:reportString,success:z.boolean().optional().catch(undefined)}).optional().catch(undefined),data:z.object({text:reportString,pageText:reportString,links:z.array(z.object({href:reportString,text:reportString})).optional().catch(undefined)}).optional().catch(undefined),lists:z.object({domains:z.array(z.string()).optional().catch(undefined),linkDomains:z.array(z.string()).optional().catch(undefined)}).optional().catch(undefined)}).catch({});
+const reportSchema=z.object({page:z.object({url:reportString,title:reportString,text:reportString,status:z.union([z.string(),z.number()]).optional().catch(undefined)}).optional().catch(undefined),task:z.object({url:reportString,domURL:reportString,status:reportString,success:z.boolean().optional().catch(undefined)}).optional().catch(undefined),data:z.object({text:reportString,pageText:reportString,links:z.array(z.object({href:reportString,text:reportString})).optional().catch(undefined)}).optional().catch(undefined),lists:z.object({domains:z.array(z.string()).optional().catch(undefined),linkDomains:z.array(z.string()).optional().catch(undefined)}).optional().catch(undefined)}).catch({});
+const loggedReports=new Set<string>();
+export function logReportOnce(linkId:string,raw:unknown) {
+  if(loggedReports.has(linkId))return;
+  loggedReports.add(linkId);
+  const record=(value:unknown):Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
+  const top=record(raw),task=record(top['task']),page=record(top['page']);
+  // Never log credentials, cookie values, people, or raw page content from a provider report.
+  const preview=JSON.stringify(raw,(key,value:unknown)=>/^(headers|cookies|authorization|token|api_?key|password|submitter|email|name|text|title|body|bodyPreview)$/i.test(key)?'[redacted]':value)?.slice(0,1500) ?? '';
+  console.info('Cloudflare result diagnostic',JSON.stringify({link_id:linkId,keys:Object.keys(top),task_keys:Object.keys(task),page_keys:Object.keys(page),body_preview:preview}));
+}
 export function parseReport(json:unknown) {
   const envelope=z.object({result:z.unknown().optional()}).passthrough().catch({}).parse(json);
-  return reportSchema.parse(envelope.result ?? json);
+  const report=reportSchema.parse(envelope.result ?? json);
+  const url=report.page?.url||report.task?.url||report.task?.domURL;
+  return {...report,...(url?{page:{...report.page,url}}:{})};
 }
 export function reportState(report:ReturnType<typeof parseReport>,startedAt:string|null,now=Date.now()):'scanning'|'unscannable'|'finished' {
   const status=(report.task?.status ?? '').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
   const pending=['queued','pending','running','in progress'].includes(status);
-  const finished=!pending && (['finished','complete'].includes(status)||!!report.page?.url);
+  const finished=!pending && (report.task?.success===true||['finished','complete'].includes(status));
   const started=Date.parse(startedAt ?? '');
   if(!finished)return Number.isFinite(started)&&now-started<90000?'scanning':'unscannable';
   return report.task?.success===false||!report.page?.url?'unscannable':'finished';
 }
-export async function markUnscannable(db:Db,id:string) {
-  must(await db.from('links').update({status:'unscannable',scan_error:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',id));
-  return {status:'unscannable'} as const;
+export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
+  const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));
+  if(!claimed){const current=requireData(await db.from('links').select('status').eq('id',link.id).single());return {status:current.status};}
+  try {
+    const es=await entities(db),domain=hostname(link.url),official=officialMatch(domain,es);
+    if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,[]);return {status:'official'} as const;}
+    const platform=platformFor(domain);
+    const age=await domainAge(db,domain,platform,`Bearer ${process.env['CLOUDFLARE_API_TOKEN'] ?? ''}`);
+    if(!link.title?.trim()&&!link.snippet?.trim()&&!link.maps_phone&&age.domain_age_days===null)throw new Error('لا تتوفر أدلة بحث أو بيانات نطاق كافية لإجراء تقييم موثوق');
+    const ai=await aiAnalyze({url:link.url,final_url:link.url,page_title:link.title ?? '',page_text:link.snippet ?? '',outgoing_domains:[],entities:es});
+    const scored=scoreFinding({url:link.url,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform});
+    must(await db.from('analyses').upsert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:link.title ?? '',outgoing_domains:[],phones_found:scored.phones,signals:scored.signals,score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,'تعذر فحص الصفحة عبر Cloudflare؛ التقييم مبني على نتيجة البحث وبيانات النطاق فقط'],ai_summary_ar:ai.summary_ar},{onConflict:'link_id'}));
+    must(await db.from('links').update({status:'done',scan_error:'الموقع غير قابل للفحص من الخارج (قد يكون محجوب جغرافياً)'}).eq('id',link.id));
+    return {status:'done'} as const;
+  } catch {
+    must(await db.from('links').update({status:'error',scan_error:'تعذر إكمال تقييم أدلة البحث وبيانات النطاق؛ لم يُصنّف الرابط على أنه آمن'}).eq('id',link.id));
+    return {status:'error'} as const;
+  }
 }
 export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<typeof parseReport>,base:string,headers:Record<string,string>) {
   const state=reportState(report,link.scan_started_at);
   if(state==='scanning')return {status:'scanning'} as const;
   const page=report.page;
-  if(state==='unscannable'||!page?.url)return markUnscannable(db,link.id);
+  if(state==='unscannable'||!page?.url)return searchEvidenceAnalysis(db,link);
   const status=Number(page.status);
-  if(status>=400)return markUnscannable(db,link.id);
+  if(status>=400)return searchEvidenceAnalysis(db,link);
   const es=await entities(db);const finalUrl=cleanUrl(page.url);const finalDomain=hostname(finalUrl);const redirect=finalDomain!==hostname(link.url)?[`الرابط يحوّل إلى نطاق آخر: ${finalDomain}`]:[];
   must(await db.from('links').update({final_url:finalUrl,domain:finalDomain,platform:platformFor(finalDomain)}).eq('id',link.id));
   const official=officialMatch(finalDomain,es);
   if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return {status:'official'} as const;}
+  const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {status:'scanning'} as const;
   const dom=await providerFetch(`${base}/dom/${link.scan_uuid}`,{headers});
   const domReasons=dom.ok?[]:['تعذر قراءة نص الصفحة من تقرير Cloudflare؛ التحليل مبني على العنوان والروابط فقط'];
   if(!dom.ok)console.warn(`Cloudflare DOM HTTP ${dom.status}; continuing with report-only analysis`);
