@@ -28,3 +28,10 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Sayyad architecture
+- Keep pure domain/scoring rules in src/lib/sayyad/rules.ts and investigation transport in engine.server.ts; this makes passive-only behavior and scoring testable.
+- Start Cloudflare scans with a database claim, then poll from a sequential browser queue; this prevents long server waits and concurrent scan starts.
+- Store only derived investigation evidence, not raw DOM or screenshots; screenshots are retrieved through an authenticated Cloudflare-only proxy.
+- Keep signed-in screens under the pathless authenticated layout and check authentication on every server function; route access is not the RPC security boundary.
+- Cache the IANA RDAP bootstrap in the database and allow registry origins only from that bootstrap; never follow upstream HTTP redirects.

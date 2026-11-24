@@ -1,0 +1,27 @@
+import {describe,it,expect} from 'vitest';
+import {cleanUrl,officialMatch,scoreFinding,riskLevel,platformFor,chainDestinations,normalizePhone,type AiFinding,type Entity} from '@/lib/sayyad/rules';
+const salik:Entity={id:'00000000-0000-4000-8000-000000000001',name_ar:'سالك',name_en:'Salik',category:'transport',official_domains:['salik.ae'],official_phones:['80072545','97142335000','97142335005'],brand_keywords:['سالك','salik'],created_at:'2026-11-24T00:00:00Z'};
+const ai:AiFinding={impersonated_entity:null,impersonation_confidence:0,asks_payment_or_card:false,asks_sensitive_data:false,phones_found:[],summary_ar:''};
+const score=(options:Partial<Parameters<typeof scoreFinding>[0]>={})=>scoreFinding({url:'https://merchant.example',entities:[salik],ai,age:null,mapsPhone:null,platform:'other',...options});
+describe('Sayyad investigator rules',()=>{
+ it('cleans Google url redirects without making requests',()=>expect(cleanUrl('https://www.google.com/url?q=https%3A%2F%2Fsalik.ae%2F')).toBe('https://salik.ae/'));
+ it('cleans Google goto redirects without making requests',()=>expect(cleanUrl('https://google.com/goto?url=https%3A%2F%2Fsalik.ae')).toBe('https://salik.ae/'));
+ it('accepts exact official domains and their subdomains',()=>{expect(officialMatch('salik.ae',[salik])?.entity?.id).toBe(salik.id);expect(officialMatch('www.salik.ae',[salik])?.entity?.id).toBe(salik.id);expect(officialMatch('salik.ae.example',[salik])).toBeNull();});
+ it('skips neutral government domains',()=>expect(officialMatch('service.gov.ae',[])?.reason).toBe('موقع معروف'));
+ it('gives 35 points at impersonation confidence 0.6',()=>{expect(score({ai:{...ai,impersonated_entity:'Salik',impersonation_confidence:.6}}).score).toBe(35);expect(score({ai:{...ai,impersonated_entity:'Salik',impersonation_confidence:.59}}).score).toBe(0);});
+ it('gives 30 for entity keyword in nonofficial domain',()=>expect(score({url:'https://salik-payment.example'}).score).toBe(30));
+ it('gives 30 for entity keyword in platform path',()=>expect(score({url:'https://linktr.ee/salik.ae.online'}).signals['similarity']).toBe(30));
+ it('gives 30 for a domain within two edits of an official domain',()=>expect(score({url:'https://salix.ae'}).score).toBe(30));
+ it('gives 20 total when payment and sensitive requests both occur',()=>expect(score({ai:{...ai,asks_payment_or_card:true,asks_sensitive_data:true}}).score).toBe(20));
+ it('gives 15 for domain age below 90, zero at 90 or unavailable',()=>{expect(score({age:89}).score).toBe(15);expect(score({age:90}).score).toBe(0);expect(score().score).toBe(0);});
+ it('gives 10 for UAE phone mismatch including Maps listing',()=>expect(score({mapsPhone:'0501234567',ai:{...ai,impersonated_entity:'Salik',impersonation_confidence:.1}}).score).toBe(10));
+ it('does not penalize the local version of an official phone',()=>expect(score({mapsPhone:'042335000',ai:{...ai,impersonated_entity:'Salik'}}).score).toBe(0));
+ it('gives 10 for a free platform',()=>expect(score({platform:'pages_dev'}).score).toBe(10));
+ it('caps total score at 100',()=>expect(score({url:'https://salik-payment.example',platform:'wix',age:57,mapsPhone:'0501234567',ai:{...ai,impersonated_entity:'Salik',impersonation_confidence:1,asks_payment_or_card:true}}).score).toBe(100));
+ it('uses green below 30, yellow 30 through 59, red at 60',()=>{expect(riskLevel(29)).toBe('green');expect(riskLevel(30)).toBe('yellow');expect(riskLevel(59)).toBe('yellow');expect(riskLevel(60)).toBe('red');});
+ it('limits bait chains to two levels',()=>expect(chainDestinations(['https://merchant.example'],[salik],2)).toEqual([]));
+ it('limits bait chains to five distinct domains and removes official links',()=>{const urls=['https://salik.ae',...Array.from({length:8},(_,i)=>`https://site${i}.example`)];expect(chainDestinations(urls,[salik],0)).toHaveLength(5);expect(chainDestinations(['https://site.example/a','https://site.example/b'],[salik],1)).toHaveLength(1);});
+ it('recognizes free platform subdomains',()=>expect(platformFor('bait.pages.dev')).toBe('pages_dev'));
+ it('normalizes contact phone evidence to digits',()=>expect(normalizePhone('+971 (4) 233 5000')).toBe('97142335000'));
+ it('rejects local or non-http URL submissions',()=>{expect(()=>cleanUrl('http://127.0.0.1')).toThrow();expect(()=>cleanUrl('file:///tmp/secret')).toThrow();});
+});
