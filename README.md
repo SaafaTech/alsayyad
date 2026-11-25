@@ -26,7 +26,7 @@ Please check single links or short lists: a full hunt runs from the browser and 
 - Abu Dhabi Police reported **15,642 cybercrime fraud cases in two years** and recovered AED 140 million for victims (Oct 2025).
 - Abu Dhabi Police warned (June 2025) that scammers use **fake ads in search engine results** and **fake websites imitating government entities and well-known companies**.
 - Awareness focuses on links sent by SMS, email and social media. **Search results and Maps are a gap**: a victim who searches "تعبئة رصيد سالك" can land on a fake page before anyone reports it.
-- **Reports arrive too late.** Of the real fraud links a cybercrime specialist gave us, **94% were already dead or removed** when we scanned them. Evidence has to be captured while the site is live.
+- **Reports arrive too late.** Of the real fraud links a cybercrime specialist gave us, **63% (98 of 156 checked) were already dead or removed** when we scanned them. Evidence has to be captured while the site is live.
 - Global scanners do not understand Arabic, UAE-specific impersonation. In our tests, Cloudflare's scanner classified confirmed fake Salik and RTA pages as **"No classification"**.
 
 ## 2. The solution
@@ -88,7 +88,7 @@ Investigator confirms or rejects ("الحكم صحيح؟") and tracks the case s
 - **An Aramex network inside the specialist's data.** Among the specialist's scattered links, Sayyad linked 4 "parcel tracking" domains (`aramex.*-track-au.com`) as one network: same IP, same page template, one day old, each 80 (red).
 - **A fake consumer-protection portal (reported by the team).** `hemaya-emirates.online`, 19 days old, impersonates the Ministry of Economy; Sayyad scored it red and documented it while live.
 - **A domain one day old.** The specialist gave us `fazhawwq.com`, a confirmed fraud link registered on 23 November. Sayyad pulled its registration date and the registrar's abuse contact automatically. Because its page could not be scanned, a rule now raises any own domain ≤ 7 days old in the review queue.
-- **Specialist dataset.** Of the specialist's fraud links: **94% dead before reaching us**, 12% came from Google ads, 24% hosted on free platforms.
+- **Specialist dataset.** Of the specialist's fraud links: **63% dead before reaching us** (98 of 156 checked), 12% came from Google ads, 24% hosted on free platforms.
 - **Fixed with real data:** `housecleaningabudhabi` was red because "abudhabi" matched TAMM — city names no longer count. A full hunt flagged official sites (`eandmoney.com`, `eand.com.eg`, `darb.qmobility.ae`) as red; they were added to the entities' official domains and re-scan green. Generic phishing pages (Netflix, Roblox, MetaMask…) were detected by the AI but not scored; they now score as brand impersonation.
 
 > Integrity: every screen separates Sayyad's own hunting from the specialist's or the team's data, and states the source.
