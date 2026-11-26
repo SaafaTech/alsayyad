@@ -2,7 +2,7 @@ import { search, ctWatch, must, requireData, type Db } from './engine.server';
 import { scanLinkCore, pollScanCore } from './scan.server';
 import { createEvidenceCore } from './evidence.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
-import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows } from './auto';
+import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows, fetchAllPages } from './auto';
 import { canCreateEvidence } from './evidence';
 import type { Json } from '@/integrations/supabase/types';
 type Kind='search'|'ct'|'worker';
@@ -11,11 +11,11 @@ const CHUNK=2;
 async function admin():Promise<Db>{return (await import('@/integrations/supabase/client.server')).supabaseAdmin as unknown as Db;}
 const msg=(e:unknown)=>e instanceof Error?e.message.slice(0,200):'unknown';
 async function settings(db:Db){return must(await db.from('auto_hunt_settings').select('enabled,daily_cap,owner_user_id').eq('id',true).maybeSingle());}
-async function expertHuntIds(db:Db){return new Set(requireData(await db.from('hunts').select('id').eq('source','expert_sample')).map(h=>h.id));}
+async function expertHuntIds(db:Db){return new Set((await fetchAllPages(async(f,t)=>requireData(await db.from('hunts').select('id').eq('source','expert_sample').order('id').range(f,t)))).map(h=>h.id));}
 /** Gate built from already-analysed links (expert samples excluded) and today's automatic count. */
 async function gate(db:Db,cap:number){
   const expert=await expertHuntIds(db);
-  const rows=requireData(await db.from('links').select('url,domain,final_url,hunt_id,analyses!inner(link_id)'));
+  const rows=await fetchAllPages(async(f,t)=>requireData(await db.from('links').select('url,domain,final_url,hunt_id,analyses!inner(link_id)').order('id').range(f,t)).map(({url,domain,final_url,hunt_id})=>({url,domain,final_url,hunt_id})));
   const today=must(await db.rpc('auto_links_today')) ?? 0;
   return autoGate(seenFrom(withoutExpertRows(rows,expert)),today,cap);
 }
@@ -61,8 +61,7 @@ export async function runWorker(budgetMs=50000){
   const t0=Date.now(),left=()=>budgetMs-(Date.now()-t0);
   const db=await admin();const s=await settings(db);if(!autoAllowed(s))return {skipped:'disabled'};
   const cursors=requireData(await db.from('engine_cache').select('key').in('key',[CURSOR.search,CURSOR.ct]));
-  const autoHunts=requireData(await db.from('hunts').select('id').eq('trigger','auto').neq('source','expert_sample')).map(h=>h.id);
-  const queue=autoHunts.length?requireData(await db.from('links').select('id,status,first_seen_at').in('hunt_id',autoHunts).in('status',['pending','scanning']).order('first_seen_at')):[];
+  const queue=requireData(await db.from('links').select('id,status,first_seen_at,hunts!inner(trigger,source)').eq('hunts.trigger','auto').neq('hunts.source','expert_sample').in('status',['pending','scanning']).order('first_seen_at').limit(50));
   if(!cursors.length&&!queue.length)return {skipped:'empty'};
   const run=await startRun(db,'worker');const errors:string[]=[];let scanned=0,red=0,yellow=0;
   for(const c of cursors)try{await step(db,c.key===CURSOR.search?'search':'ct',s.owner_user_id,s.daily_cap);}catch(e){errors.push(msg(e));}

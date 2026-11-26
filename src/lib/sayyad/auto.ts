@@ -28,3 +28,8 @@ export function autoGate(seen:Seen,todayCount:number,cap:number){
 export const ctAutoKeywords=(es:{brand_keywords:string[]}[])=>[...new Set(es.flatMap(e=>e.brand_keywords).map(k=>k.trim().toLowerCase()).filter(k=>/^[a-z0-9]{4,40}$/.test(k)))];
 /** Expert-sample links never count as already analysed for the automatic hunt. */
 export const withoutExpertRows=<T extends {hunt_id:string|null}>(rows:T[],expert:Set<string>)=>rows.filter(r=>!r.hunt_id||!expert.has(r.hunt_id));
+/** Reads every row by fetching pages of pageSize until a short page arrives (PostgREST caps each request). */
+export async function fetchAllPages<T>(page:(from:number,to:number)=>Promise<T[]>,pageSize=1000):Promise<T[]>{
+  const out:T[]=[];
+  for(let from=0;;from+=pageSize){const rows=await page(from,from+pageSize-1);out.push(...rows);if(rows.length<pageSize)return out;}
+}

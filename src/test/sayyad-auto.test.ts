@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { autoAllowed, autoGate, seenFrom, alreadyAnalysed, withoutExpertRows, ctAutoKeywords } from '@/lib/sayyad/auto';
+import { autoAllowed, autoGate, seenFrom, alreadyAnalysed, withoutExpertRows, ctAutoKeywords, fetchAllPages } from '@/lib/sayyad/auto';
 const none=()=>seenFrom([]);
 describe('automatic hunt rules', () => {
   it('stops adding links at the daily cap', () => {
@@ -43,5 +43,11 @@ describe('automatic hunt rules', () => {
   });
   it('uses only valid brand keywords for CT', () => {
     expect(ctAutoKeywords([{brand_keywords:['salik','ab','Salik','with space']}])).toEqual(['salik']);
+  });
+  it('keeps fetching pages until a short page', async () => {
+    const data=Array.from({length:7},(_,i)=>i);const calls:[number,number][]=[];
+    const rows=await fetchAllPages(async(f,t)=>{calls.push([f,t]);return data.slice(f,t+1);},3);
+    expect(rows).toEqual(data);
+    expect(calls).toEqual([[0,2],[3,5],[6,8]]);
   });
 });
