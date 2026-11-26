@@ -10,7 +10,7 @@ Sayyad will hunt and scan on a schedule with no browser open. It reuses the exis
 
 ## 2. Shared cores (refactor, no behaviour change)
 - The bodies of searchGoogle/searchMaps, ctWatch, scanLink, pollScan and createEvidence move into cores that take `(db, userId)`. The current UI server functions call these cores, so the manual flow works exactly as today.
-- A cap + dedupe gate for auto runs: skip any URL whose normalized form, or whose domain, already has an analysis. Stop inserting once today's count reaches the cap. Expert_sample hunts are excluded everywhere, as today.
+- A cap + dedupe gate for auto runs: skip any URL whose normalized form already has an analysis; on normal domains also skip a domain that already has one. On free/shared platforms and URL shorteners, dedupe by full normalized URL only. Stop inserting once today's count reaches the cap. Expert_sample hunts are excluded everywhere, as today.
 
 ## 3. Cron routes (protected by authenticateCronRequest, service privileges, created_by = owner)
 - `/api/public/cron/auto-search`: Google + Maps searches for every active phrase. Hunts are marked 'auto'.

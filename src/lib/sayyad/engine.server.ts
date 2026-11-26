@@ -56,18 +56,20 @@ export async function officialAnalysis(db:Db,id:string,reason:string,entityId:st
   must(await db.from('links').update({status:'official'}).eq('id',id));
 }
 const serperSchema=z.object({organic:z.array(z.object({link:z.string(),title:z.string().optional(),snippet:z.string().optional(),position:z.number().optional()})).optional(), ads:z.array(z.object({link:z.string().optional(),url:z.string().optional(),title:z.string().optional(),snippet:z.string().optional(),position:z.number().optional()})).optional(),places:z.array(z.object({website:z.string().optional(),phoneNumber:z.string().optional(),title:z.string().optional(),position:z.number().optional()})).optional()});
-export async function search(db:Db,userId:string,phrase:string,source:'google'|'maps',key:string) {
+export type HuntOpts={trigger?:'manual'|'auto';allow?:(url:string)=>boolean};
+export async function search(db:Db,userId:string,phrase:string,source:'google'|'maps',key:string,opts:HuntOpts={}) {
+  const ok=opts.allow ?? (()=>true);
   const res=await providerFetch(`https://google.serper.dev/${source==='google'?'search':'maps'}`,{method:'POST',headers:{'X-API-KEY':key,'Content-Type':'application/json'},body:JSON.stringify({q:phrase,gl:'ae',hl:searchLanguage(phrase),...(source==='google'?{num:10}:{})})});
   if(!res.ok)throw new Error('تعذر البحث عبر Serper؛ تحقق من الإعدادات والرصيد');
   const result=serperSchema.parse(await res.json());const es=await entities(db);
-  const hunt=requireData(await db.from('hunts').insert({phrase,source,created_by:userId}).select('*').single());
+  const hunt=requireData(await db.from('hunts').insert({phrase,source,created_by:userId,trigger:opts.trigger ?? 'manual'}).select('*').single());
   let count=0,noSite=0;
   if(source==='google') {
-    for(const [i,item] of (result.organic ?? []).entries()) if(await addLink(db,{url:item.link,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',snippet:item.snippet ?? ''},es))count++;
-    for(const [i,item] of (result.ads ?? []).entries()) if(item.link || item.url)if(await addLink(db,{url:item.link ?? item.url ?? '',hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',snippet:item.snippet ?? '',is_ad:true},es))count++;
+    for(const [i,item] of (result.organic ?? []).entries()) if(ok(item.link)&&await addLink(db,{url:item.link,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',snippet:item.snippet ?? ''},es))count++;
+    for(const [i,item] of (result.ads ?? []).entries()) if((item.link || item.url)&&ok(item.link ?? item.url ?? ''))if(await addLink(db,{url:item.link ?? item.url ?? '',hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',snippet:item.snippet ?? '',is_ad:true},es))count++;
   } else for(const [i,item] of (result.places ?? []).entries()) {
-    if(item.website){if(await addLink(db,{url:item.website,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',maps_phone:item.phoneNumber?normalizePhone(item.phoneNumber):null},es))count++;continue;}
-    const f=mapsListingFinding(item,es);if(!f){noSite++;continue;}
+    if(item.website){if(ok(item.website)&&await addLink(db,{url:item.website,hunt_id:hunt.id,rank:item.position ?? i+1,title:item.title ?? '',maps_phone:item.phoneNumber?normalizePhone(item.phoneNumber):null},es))count++;continue;}
+    const f=mapsListingFinding(item,es);if(!f){noSite++;continue;}if(!ok(f.url))continue;
     await storeMapsListing(db,f,hunt.id,item.position ?? i+1);count++;
   }
   must(await db.from('hunts').update({results_count:count}).eq('id',hunt.id));return {hunt_id:hunt.id,results_count:count,no_site:noSite};
@@ -238,14 +240,15 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
 }
 
 /** Early detection: new certificates for a brand keyword in Certificate Transparency (crt.sh), last 14 days, max 40 domains. */
-export async function ctWatch(db:Db,userId:string,keyword:string) {
+export async function ctWatch(db:Db,userId:string,keyword:string,opts:HuntOpts={}) {
+  const ok=opts.allow ?? (()=>true);
   let records:{name_value?:string|undefined;not_before?:string|undefined}[]|null=null;
   for(let i=0;i<2&&!records;i++)try{const r=await providerFetch(`https://crt.sh/?q=%25${encodeURIComponent(keyword)}%25&output=json`);if(!r.ok)continue;records=z.array(z.object({name_value:z.string().optional(),not_before:z.string().optional()})).parse(await r.json());}catch{continue;}
   if(!records)throw new Error(`تعذر الوصول إلى سجلات الشهادات لـ ${keyword}`);
   const es=await entities(db);const found=ctDomains(records,es,Date.now());
-  const hunt=requireData(await db.from('hunts').insert({phrase:`سجلات الشهادات: ${keyword}`,source:'ct',created_by:userId}).select('*').single());
+  const hunt=requireData(await db.from('hunts').insert({phrase:`سجلات الشهادات: ${keyword}`,source:'ct',created_by:userId,trigger:opts.trigger ?? 'manual'}).select('*').single());
   let count=0;
-  for(const [i,f] of found.entries()){const link=await addLink(db,{url:`https://${f.domain}/`,hunt_id:hunt.id,rank:i+1,title:ctTitle,ct_first_seen:f.first_seen},es);if(link)count++;}
+  for(const [i,f] of found.entries()){if(!ok(`https://${f.domain}/`))continue;const link=await addLink(db,{url:`https://${f.domain}/`,hunt_id:hunt.id,rank:i+1,title:ctTitle,ct_first_seen:f.first_seen},es);if(link)count++;}
   must(await db.from('hunts').update({results_count:count}).eq('id',hunt.id));
   return {hunt_id:hunt.id,found:count};
 }

@@ -124,6 +124,69 @@ export type Database = {
           },
         ]
       }
+      auto_hunt_settings: {
+        Row: {
+          daily_cap: number
+          enabled: boolean
+          id: boolean
+          owner_user_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          daily_cap?: number
+          enabled?: boolean
+          id?: boolean
+          owner_user_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          daily_cap?: number
+          enabled?: boolean
+          id?: boolean
+          owner_user_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      auto_runs: {
+        Row: {
+          errors: Json
+          finished_at: string | null
+          id: string
+          kind: string
+          new_links: number
+          red: number
+          scanned: number
+          started_at: string
+          status: string
+          yellow: number
+        }
+        Insert: {
+          errors?: Json
+          finished_at?: string | null
+          id?: string
+          kind: string
+          new_links?: number
+          red?: number
+          scanned?: number
+          started_at?: string
+          status?: string
+          yellow?: number
+        }
+        Update: {
+          errors?: Json
+          finished_at?: string | null
+          id?: string
+          kind?: string
+          new_links?: number
+          red?: number
+          scanned?: number
+          started_at?: string
+          status?: string
+          yellow?: number
+        }
+        Relationships: []
+      }
       campaign_links: {
         Row: {
           campaign_id: string
@@ -413,6 +476,7 @@ export type Database = {
           phrase: string
           results_count: number
           source: string
+          trigger: string
         }
         Insert: {
           created_at?: string
@@ -421,6 +485,7 @@ export type Database = {
           phrase: string
           results_count?: number
           source: string
+          trigger?: string
         }
         Update: {
           created_at?: string
@@ -429,6 +494,7 @@ export type Database = {
           phrase?: string
           results_count?: number
           source?: string
+          trigger?: string
         }
         Relationships: []
       }
@@ -639,6 +705,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      auto_links_today: { Args: never; Returns: number }
       claim_analysis: { Args: { _link_id: string }; Returns: boolean }
       claim_scan: { Args: { _link_id: string }; Returns: boolean }
       has_role: {

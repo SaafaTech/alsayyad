@@ -18,6 +18,9 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedEvidenceRouteImport } from './routes/_authenticated/evidence'
 import { Route as AuthenticatedExpertRouteImport } from './routes/_authenticated/expert'
 import { Route as AuthenticatedHuntRouteImport } from './routes/_authenticated/hunt'
+import { Route as ApiPublicCronAutoCtRouteImport } from './routes/api/public/cron/auto-ct'
+import { Route as ApiPublicCronAutoSearchRouteImport } from './routes/api/public/cron/auto-search'
+import { Route as ApiPublicCronAutoWorkerRouteImport } from './routes/api/public/cron/auto-worker'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -63,6 +66,21 @@ const AuthenticatedHuntRoute = AuthenticatedHuntRouteImport.update({
   path: '/hunt',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicCronAutoCtRoute = ApiPublicCronAutoCtRouteImport.update({
+  id: '/api/public/cron/auto-ct',
+  path: '/api/public/cron/auto-ct',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicCronAutoSearchRoute = ApiPublicCronAutoSearchRouteImport.update({
+  id: '/api/public/cron/auto-search',
+  path: '/api/public/cron/auto-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicCronAutoWorkerRoute = ApiPublicCronAutoWorkerRouteImport.update({
+  id: '/api/public/cron/auto-worker',
+  path: '/api/public/cron/auto-worker',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -73,6 +91,9 @@ export interface FileRoutesByFullPath {
   '/evidence': typeof AuthenticatedEvidenceRoute
   '/expert': typeof AuthenticatedExpertRoute
   '/hunt': typeof AuthenticatedHuntRoute
+  '/api/public/cron/auto-ct': typeof ApiPublicCronAutoCtRoute
+  '/api/public/cron/auto-search': typeof ApiPublicCronAutoSearchRoute
+  '/api/public/cron/auto-worker': typeof ApiPublicCronAutoWorkerRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -83,6 +104,9 @@ export interface FileRoutesByTo {
   '/evidence': typeof AuthenticatedEvidenceRoute
   '/expert': typeof AuthenticatedExpertRoute
   '/hunt': typeof AuthenticatedHuntRoute
+  '/api/public/cron/auto-ct': typeof ApiPublicCronAutoCtRoute
+  '/api/public/cron/auto-search': typeof ApiPublicCronAutoSearchRoute
+  '/api/public/cron/auto-worker': typeof ApiPublicCronAutoWorkerRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -95,6 +119,9 @@ export interface FileRoutesById {
   '/_authenticated/evidence': typeof AuthenticatedEvidenceRoute
   '/_authenticated/expert': typeof AuthenticatedExpertRoute
   '/_authenticated/hunt': typeof AuthenticatedHuntRoute
+  '/api/public/cron/auto-ct': typeof ApiPublicCronAutoCtRoute
+  '/api/public/cron/auto-search': typeof ApiPublicCronAutoSearchRoute
+  '/api/public/cron/auto-worker': typeof ApiPublicCronAutoWorkerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -107,6 +134,9 @@ export interface FileRouteTypes {
     | '/evidence'
     | '/expert'
     | '/hunt'
+    | '/api/public/cron/auto-ct'
+    | '/api/public/cron/auto-search'
+    | '/api/public/cron/auto-worker'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -117,6 +147,9 @@ export interface FileRouteTypes {
     | '/evidence'
     | '/expert'
     | '/hunt'
+    | '/api/public/cron/auto-ct'
+    | '/api/public/cron/auto-search'
+    | '/api/public/cron/auto-worker'
   id:
     | '__root__'
     | '/'
@@ -128,12 +161,18 @@ export interface FileRouteTypes {
     | '/_authenticated/evidence'
     | '/_authenticated/expert'
     | '/_authenticated/hunt'
+    | '/api/public/cron/auto-ct'
+    | '/api/public/cron/auto-search'
+    | '/api/public/cron/auto-worker'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicCronAutoCtRoute: typeof ApiPublicCronAutoCtRoute
+  ApiPublicCronAutoSearchRoute: typeof ApiPublicCronAutoSearchRoute
+  ApiPublicCronAutoWorkerRoute: typeof ApiPublicCronAutoWorkerRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -201,6 +240,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHuntRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/cron/auto-ct': {
+      id: '/api/public/cron/auto-ct'
+      path: '/api/public/cron/auto-ct'
+      fullPath: '/api/public/cron/auto-ct'
+      preLoaderRoute: typeof ApiPublicCronAutoCtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/cron/auto-search': {
+      id: '/api/public/cron/auto-search'
+      path: '/api/public/cron/auto-search'
+      fullPath: '/api/public/cron/auto-search'
+      preLoaderRoute: typeof ApiPublicCronAutoSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/cron/auto-worker': {
+      id: '/api/public/cron/auto-worker'
+      path: '/api/public/cron/auto-worker'
+      fullPath: '/api/public/cron/auto-worker'
+      preLoaderRoute: typeof ApiPublicCronAutoWorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -229,6 +289,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicCronAutoCtRoute: ApiPublicCronAutoCtRoute,
+  ApiPublicCronAutoSearchRoute: ApiPublicCronAutoSearchRoute,
+  ApiPublicCronAutoWorkerRoute: ApiPublicCronAutoWorkerRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

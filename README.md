@@ -183,6 +183,14 @@ Capped at 100; the two impersonation rows never add up. Safety rules:
 - A larger registry (government, banks, delivery, utilities) and search phrases learned from real case data.
 - A public lookup ("is this link official?") answering from Sayyad's database.
 
+## Automatic hunt
+
+- **Schedule:** a full search sweep daily at 03:00 Dubai, a certificate-log sweep every 6 hours, and a scan worker every 5 minutes. Long sweeps continue in small chunks on each worker run.
+- **Cap:** at most the daily cap of new automatic links per Dubai day (default 100, owner-adjustable 10–500). The owner can switch the automatic hunt off at any time.
+- **Cost control:** already-analysed URLs are never added again, and neither are already-analysed domains, except on free/shared platforms and shorteners, where only the exact URL counts. The worker exits immediately when there is nothing to do.
+- **Passive only:** the same allowlisted providers (Serper, Cloudflare URL Scanner, RDAP, crt.sh, Lovable AI) and the same scoring. Nothing logs in, submits forms or probes the sites.
+- **Privacy:** yellow/red results get an evidence file automatically with a custody entry marked "auto". No personal data is collected.
+
 ## Repository map
 
 | Path | What is there |
