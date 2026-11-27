@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state=vi.hoisted(()=>({events:[] as string[],enabled:true,cursor:{i:0,run_id:'sweep'},saved:[] as {i:number;new_links:number;errors:string[]}[],total:0,errors:[] as string[],db:{} as unknown}));
+const state=vi.hoisted(()=>({events:[] as string[],enabled:true,cursor:{i:0,run_id:'sweep'},saved:[] as {i:number;new_links:number;errors:string[]}[],total:0,errors:[] as string[],db:{} as unknown,recent:[] as unknown[],filed:[] as unknown[]}));
 vi.mock('@/integrations/supabase/client.server',()=>({supabaseAdmin:state.db}));
 vi.mock('@/lib/sayyad/engine.server',()=>({
   must:(result:{data:unknown;error:unknown})=>{if(result.error)throw result.error;return result.data;},
@@ -12,7 +12,7 @@ vi.mock('@/lib/sayyad/scan.server',()=>({
   pollScanCore:async()=>{state.events.push('poll');return {status:'done'};},
   scanLinkCore:async()=>{state.events.push('start');return {started:true,status:'scanning'};},
 }));
-vi.mock('@/lib/sayyad/evidence.server',()=>({createEvidenceCore:async()=>{state.events.push('evidence');}}));
+vi.mock('@/lib/sayyad/evidence.server',()=>({createEvidenceCore:async(_db:unknown,_u:string,id:string)=>{state.events.push(id==='missed'?'backfill missed':'evidence');}}));
 vi.mock('@/lib/sayyad/campaigns.server',()=>({maybeRebuildCampaigns:async()=>{state.events.push('campaigns');}}));
 
 import { runWorker, startSweep } from '@/lib/sayyad/auto.server';
@@ -23,7 +23,7 @@ function database(){
     const builder={
       select:(_columns:string)=>builder,
       eq:(key:string,value:unknown)=>{filters[key]=value;return builder;},
-      neq:()=>builder,in:()=>builder,order:()=>builder,range:()=>builder,limit:()=>builder,
+      neq:()=>builder,in:()=>builder,gte:()=>builder,order:()=>builder,range:()=>builder,limit:()=>builder,
       single:()=>{single=true;return builder;},maybeSingle:()=>{single=true;return builder;},
       insert:(value:Record<string,unknown>)=>{operation='insert';patch=value;return builder;},
       update:(value:Record<string,unknown>)=>{operation='update';patch=value;return builder;},
@@ -46,7 +46,8 @@ function database(){
         }
         if(table==='links'&&filters['status']==='scanning')data=[{id:'scanning',status:'scanning'}];
         if(table==='links'&&filters['status']==='pending')data=[{id:'pending',status:'pending'}];
-        if(table==='analyses')data={level:'red'};
+        if(table==='analyses')data=single?{level:'red'}:state.recent;
+        if(table==='evidence')data=state.filed;
         if(table==='entities')data=[{brand_keywords:['first','second']}];
         return Promise.resolve({data,error:null}).then(resolve);
       },
@@ -54,7 +55,7 @@ function database(){
     return builder;
   }};
 }
-beforeEach(()=>{state.events=[];state.enabled=true;state.cursor={i:0,run_id:'sweep'};state.saved=[];state.total=0;state.errors=[];state.db=database();});
+beforeEach(()=>{state.events=[];state.enabled=true;state.cursor={i:0,run_id:'sweep'};state.saved=[];state.total=0;state.errors=[];state.recent=[];state.filed=[];state.db=database();});
 describe('automatic worker orchestration',()=>{
   it('starts a sweep without running any provider or scans',async()=>{
     await startSweep('ct');
@@ -64,6 +65,14 @@ describe('automatic worker orchestration',()=>{
     await runWorker();
     expect(state.events).toEqual(['run worker','poll','start','evidence','campaigns','ct first','cursor 1','ct second','cursor 2']);
     expect(state.saved).toEqual([{i:1,new_links:3,errors:[]},{i:2,new_links:3,errors:['second: provider unavailable']}]);
+  });
+  it('back-fills a missed evidence file for a recent automatic yellow/red link before scanning',async()=>{
+    const at=new Date(Date.now()-3600000).toISOString();
+    state.recent=[{link_id:'missed',level:'yellow',created_at:at,links:{hunts:{trigger:'auto',source:'google'}}},{link_id:'has',level:'red',created_at:at,links:{hunts:{trigger:'auto',source:'google'}}}];
+    state.filed=[{link_id:'has'}];
+    await runWorker();
+    expect(state.events.slice(0,3)).toEqual(['run worker','backfill missed','poll']);
+    expect(state.events.filter(e=>e==='backfill missed')).toHaveLength(1);
   });
   it('does not scan or create a run while the setting is off',async()=>{
     state.enabled=false;

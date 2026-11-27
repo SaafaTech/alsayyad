@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           age_source: string
           ai_summary_ar: string
+          captured_at: string | null
           cf_scan_uuid: string | null
           created_at: string
           domain_age_days: number | null
@@ -31,13 +32,17 @@ export type Database = {
           page_title: string
           phones_found: string[]
           reasons_ar: string[]
+          scanner: string | null
           score: number
+          screenshot_path: string | null
+          screenshot_sha256: string | null
           signals: Json
           whois: Json | null
         }
         Insert: {
           age_source?: string
           ai_summary_ar?: string
+          captured_at?: string | null
           cf_scan_uuid?: string | null
           created_at?: string
           domain_age_days?: number | null
@@ -51,13 +56,17 @@ export type Database = {
           page_title?: string
           phones_found?: string[]
           reasons_ar?: string[]
+          scanner?: string | null
           score?: number
+          screenshot_path?: string | null
+          screenshot_sha256?: string | null
           signals?: Json
           whois?: Json | null
         }
         Update: {
           age_source?: string
           ai_summary_ar?: string
+          captured_at?: string | null
           cf_scan_uuid?: string | null
           created_at?: string
           domain_age_days?: number | null
@@ -71,7 +80,10 @@ export type Database = {
           page_title?: string
           phones_found?: string[]
           reasons_ar?: string[]
+          scanner?: string | null
           score?: number
+          screenshot_path?: string | null
+          screenshot_sha256?: string | null
           signals?: Json
           whois?: Json | null
         }
@@ -131,6 +143,7 @@ export type Database = {
           id: boolean
           owner_user_id: string | null
           updated_at: string
+          zyte_daily_cap: number
         }
         Insert: {
           daily_cap?: number
@@ -138,6 +151,7 @@ export type Database = {
           id?: boolean
           owner_user_id?: string | null
           updated_at?: string
+          zyte_daily_cap?: number
         }
         Update: {
           daily_cap?: number
@@ -145,6 +159,7 @@ export type Database = {
           id?: boolean
           owner_user_id?: string | null
           updated_at?: string
+          zyte_daily_cap?: number
         }
         Relationships: []
       }
@@ -547,6 +562,8 @@ export type Database = {
           ct_first_seen: string | null
           depth: number
           domain: string
+          fallback_attempts: number
+          fallback_queued_at: string | null
           final_url: string | null
           first_seen_at: string
           hunt_id: string | null
@@ -564,11 +581,14 @@ export type Database = {
           status: string
           title: string
           url: string
+          zyte_started_at: string | null
         }
         Insert: {
           ct_first_seen?: string | null
           depth?: number
           domain: string
+          fallback_attempts?: number
+          fallback_queued_at?: string | null
           final_url?: string | null
           first_seen_at?: string
           hunt_id?: string | null
@@ -586,11 +606,14 @@ export type Database = {
           status?: string
           title?: string
           url: string
+          zyte_started_at?: string | null
         }
         Update: {
           ct_first_seen?: string | null
           depth?: number
           domain?: string
+          fallback_attempts?: number
+          fallback_queued_at?: string | null
           final_url?: string | null
           first_seen_at?: string
           hunt_id?: string | null
@@ -608,6 +631,7 @@ export type Database = {
           status?: string
           title?: string
           url?: string
+          zyte_started_at?: string | null
         }
         Relationships: [
           {
@@ -700,6 +724,32 @@ export type Database = {
         }
         Relationships: []
       }
+      zyte_attempts: {
+        Row: {
+          created_at: string
+          id: string
+          link_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          link_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          link_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zyte_attempts_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -708,6 +758,7 @@ export type Database = {
       auto_links_today: { Args: never; Returns: number }
       claim_analysis: { Args: { _link_id: string }; Returns: boolean }
       claim_scan: { Args: { _link_id: string }; Returns: boolean }
+      claim_zyte: { Args: { _link_id: string }; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -717,6 +768,8 @@ export type Database = {
       }
       replace_campaigns: { Args: { _campaigns: Json }; Returns: number }
       rescan_link: { Args: { _link_id: string }; Returns: number }
+      zyte_day_start: { Args: never; Returns: string }
+      zyte_today: { Args: never; Returns: number }
     }
     Enums: {
       app_role: "investigator"

@@ -26,7 +26,7 @@ export const screenshotUrl=createServerFn({method:'POST'}).middleware([requireSu
   const ev=requireData(await context.supabase.from('evidence').select('id,case_no,screenshot_path').eq('id',data.evidence_id).single());
   if(!ev.screenshot_path)return null;
   const { supabaseAdmin }=await import('@/integrations/supabase/client.server');
-  const r=await supabaseAdmin.storage.from('evidence').createSignedUrl(ev.screenshot_path,300,data.download?{download:`${ev.case_no}.png`}:undefined);
+  const r=await supabaseAdmin.storage.from('evidence').createSignedUrl(ev.screenshot_path,300,data.download?{download:`${ev.case_no}.${ev.screenshot_path.endsWith('.jpg')?'jpg':'png'}`}:undefined);
   if(r.error)return null;
   if(data.download)await logAction(context.supabase,ev.id,'downloaded_original',null,context.userId);
   return r.data.signedUrl;

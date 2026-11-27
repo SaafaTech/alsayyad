@@ -31,6 +31,8 @@ use the editor.
 
 ## Sayyad architecture
 - Auto hunt runs from authenticated /api/public/cron/* routes sharing UI search/scan/evidence cores; daily cap and dedupe (full URL only on shared platforms/shorteners) control cost. Sweep entry points only create runs/cursors; workers clean stale runs even when disabled, poll scans before starting scans and filing yellow/red evidence, then continue sweeps only with at least 20 seconds left, checkpointing the cursor and run totals after every item (success or error) to preserve progress across interrupted requests.
+- Zyte API (api.zyte.com, geolocation AE) is a fallback scanner only where Cloudflare is unscannable/refused: claim_zyte enforces the Asia/Dubai daily cap and a per-link lock, the worker makes at most one call per run with >=40s left and finalises via searchEvidenceAnalysis after 3 attempts or 6h, results go through the shared pageGate/scorePage pipeline, and the one-time screenshot is stored only for yellow/red; this keeps cost bounded and scores comparable.
+- The automatic worker back-fills up to 3 missing evidence files per run for auto yellow/red links from the last 48h; evidence creation can be skipped when a run runs out of time.
 - Keep pure domain/scoring rules in src/lib/sayyad/rules.ts and investigation transport in engine.server.ts; this makes passive-only behavior and scoring testable.
 - Start Cloudflare scans with a database claim, then poll from a sequential browser queue; this prevents long server waits and concurrent scan starts.
 - Store only derived investigation evidence, not raw DOM or screenshots; screenshots are retrieved through an authenticated Cloudflare-only proxy.

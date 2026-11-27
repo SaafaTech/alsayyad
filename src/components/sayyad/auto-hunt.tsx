@@ -22,15 +22,18 @@ export function NightCard(){const q=useAuto();const d=q.data?.day;
 }
 /** Hunt page: owner-only switch, cap and recent runs. */
 export function AutoPanel(){const q=useAuto(),qc=useQueryClient(),save=useServerFn(setAutoSettings);const s=q.data?.settings;
-  const[cap,setCap]=useState('');useEffect(()=>{if(s)setCap(String(s.daily_cap));},[s?.daily_cap]);
+  const[cap,setCap]=useState(''),[zcap,setZcap]=useState('');useEffect(()=>{if(s)setCap(String(s.daily_cap));},[s?.daily_cap]);useEffect(()=>{if(s)setZcap(String(s.zyte_daily_cap));},[s?.zyte_daily_cap]);
   if(!q.data?.isOwner||!s)return null;
-  async function put(enabled:boolean,daily_cap:number){try{await save({data:{enabled,daily_cap}});await qc.invalidateQueries({queryKey:['auto-state']});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر الحفظ"));}}
-  const capN=Number(cap),capOk=Number.isInteger(capN)&&capN>=10&&capN<=500;
+  async function put(enabled:boolean,daily_cap:number,zyte_daily_cap=s?.zyte_daily_cap ?? 30){try{await save({data:{enabled,daily_cap,zyte_daily_cap}});await qc.invalidateQueries({queryKey:['auto-state']});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر الحفظ"));}}
+  const capN=Number(cap),capOk=Number.isInteger(capN)&&capN>=10&&capN<=500,zN=Number(zcap),zOk=zcap!==''&&Number.isInteger(zN)&&zN>=0&&zN<=500;
   return <section className="analysis-section mt-4"><h2 className="flex items-center gap-2"><Bot size={16}/>{tr("الصيد التلقائي")}</h2>
     <div className="flex flex-wrap items-center gap-4 text-sm"><label className="flex items-center gap-2"><Switch checked={s.enabled} onCheckedChange={v=>void put(v,s.daily_cap)} aria-label={tr("تشغيل الصيد التلقائي")}/>{s.enabled?tr("يعمل"):tr("متوقف")}</label>
       <label className="flex items-center gap-2">{tr("الحد اليومي")}<Input type="number" min={10} max={500} className="w-24" dir="ltr" value={cap} onChange={e=>setCap(e.target.value)}/></label>
       <Button size="sm" variant="outline" className="text-foreground" disabled={!capOk||capN===s.daily_cap} onClick={()=>void put(s.enabled,capN)}>{tr("حفظ")}</Button>
       <span className="text-muted-foreground">{tf("اليوم: {0} من {1}",q.data.today,s.daily_cap)}</span></div>
+    <div className="mt-3 flex flex-wrap items-center gap-4 text-sm"><span>{tf("فحوصات Zyte اليوم {0} / {1}",q.data.zyteToday,s.zyte_daily_cap)}</span>
+      <label className="flex items-center gap-2">{tr("حد Zyte اليومي")}<Input type="number" min={0} max={500} className="w-24" dir="ltr" value={zcap} onChange={e=>setZcap(e.target.value)}/></label>
+      <Button size="sm" variant="outline" className="text-foreground" disabled={!zOk||zN===s.zyte_daily_cap} onClick={()=>void put(s.enabled,s.daily_cap,zN)}>{tr("حفظ")}</Button></div>
     {q.data.runs.length?<ul className="mt-3 space-y-1 text-sm">{q.data.runs.map(r=><li key={r.id} className="flex flex-wrap gap-2 text-muted-foreground"><span>{when(r.started_at)}</span><b className="text-foreground">{tr(kindLabel[r.kind] ?? r.kind)}</b><span>{tr(statusLabel[r.status] ?? r.status)}</span><span>{tf("{0} جديد • {1} فُحص • {2} خطر • {3} مراجعة",r.new_links,r.scanned,r.red,r.yellow)}</span></li>)}</ul>:<p className="mt-3 text-sm text-muted-foreground">{tr("لا توجد تشغيلات بعد")}</p>}
   </section>;
 }

@@ -4,6 +4,7 @@ import { createEvidenceCore } from './evidence.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
 import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows, fetchAllPages, checkpointItems, staleAutoRuns } from './auto';
 import { canCreateEvidence } from './evidence';
+import { missingEvidence, type FallbackCtx } from './zyte';
 import type { Json } from '@/integrations/supabase/types';
 type Kind='search'|'ct'|'worker';
 const CURSOR={search:'auto-search-cursor',ct:'auto-ct-cursor'} as const;
@@ -70,15 +71,22 @@ export async function runWorker(budgetMs=50000){
   const t0=Date.now(),left=()=>budgetMs-(Date.now()-t0);
   const db=await admin();await cleanupStaleRuns(db);const s=await settings(db);if(!autoAllowed(s))return {skipped:'disabled'};
   const cursors=requireData(await db.from('engine_cache').select('key').in('key',[CURSOR.search,CURSOR.ct]));
+  // Back-fill evidence files skipped by earlier runs that ran out of time.
+  const recent=requireData(await db.from('analyses').select('link_id,level,created_at,links!inner(hunts!inner(trigger,source))').in('level',['yellow','red']).gte('created_at',new Date(Date.now()-48*3600000).toISOString()).eq('links.hunts.trigger','auto').neq('links.hunts.source','expert_sample').order('created_at').limit(200));
+  const filed=recent.length?new Set(requireData(await db.from('evidence').select('link_id').in('link_id',recent.map(r=>r.link_id))).map(e=>e.link_id)):new Set<string>();
+  const backfill=missingEvidence(recent.map(r=>({link_id:r.link_id,level:r.level,created_at:r.created_at,trigger:r.links.hunts.trigger,source:r.links.hunts.source})),filed,Date.now());
   const queueFor=(status:'pending'|'scanning')=>db.from('links').select('id,status,first_seen_at,hunts!inner(trigger,source)').eq('hunts.trigger','auto').neq('hunts.source','expert_sample').eq('status',status).order('first_seen_at').limit(50);
   const scanning=requireData(await queueFor('scanning'));
   const pending=requireData(await queueFor('pending'));
-  if(!cursors.length&&!scanning.length&&!pending.length)return {skipped:'empty'};
+  if(!cursors.length&&!scanning.length&&!pending.length&&!backfill.length)return {skipped:'empty'};
   const run=await startRun(db,'worker');const errors:string[]=[];let scanned=0,red=0,yellow=0;
   const finished:string[]=[];
-  for(const l of scanning){if(left()<15000)break;try{const r=await pollScanCore({link_id:l.id},{supabase:db});if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
+  for(const b of backfill){if(left()<15000)break;try{await createEvidenceCore(db,s.owner_user_id,b.link_id,{actor:s.owner_user_id,detail:'auto'});}catch(e){errors.push(msg(e));}}
+  // At most one Zyte (AE) fallback call per worker run, and only with enough budget left.
+  const ctx:FallbackCtx={mode:'auto',left,used:{n:0}};
+  for(const l of scanning){if(left()<15000)break;try{const r=await pollScanCore({link_id:l.id},{supabase:db},ctx);if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
   let started=0;
-  for(const l of pending){if(started>=3||left()<10000)break;try{const r=await scanLinkCore(db,l.id);if(r.status==='waiting')break;if(r.started)started++;else if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
+  for(const l of pending){if(started>=3||left()<10000)break;try{const r=await scanLinkCore(db,l.id,ctx);if(r.status==='waiting')break;if(r.started)started++;else if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
   for(const id of finished){
     const a=must(await db.from('analyses').select('level').eq('link_id',id).maybeSingle());if(!a)continue;scanned++;
     if(a.level==='red')red++;else if(a.level==='yellow')yellow++;

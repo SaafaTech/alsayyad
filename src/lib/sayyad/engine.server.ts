@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { parseWhois, ctDomains, ctTitle } from './early';
 import type { Database, Tables } from '@/integrations/supabase/types';
 import { buildIndicators } from './indicators';
+import { zyteSuccessReason } from './zyte';
 import { mapsListingFinding, aiSchema, cleanUrl, hostname, officialDestination, platformFor, normalizePhone, registrationDomain, freePlatform, scoreFinding, chainDestinations, classifyDestinations, applyOfficialDestinations, isRemovedPage, unverifiedFallback, applyNewUnscannable, scamTypes, isShortener, neutralAi, searchLanguage, shortenerReason, shortenerUnresolvedReason, type AiFinding, type Entity, type ParentSuspicion } from './rules';
 export type Db = SupabaseClient<Database>;
 export const must = <T>(result:{data:T;error:unknown})=>{if(result.error)throw new Error('تعذر حفظ أو قراءة بيانات التحقيق');return result.data;};
@@ -13,10 +14,10 @@ export function requireData<T>(result:{data:T;error:unknown}):NonNullable<T> { c
 export async function providerFetch(url:string,init:RequestInit={},rdapOrigins:string[]=[]) {
   const u=new URL(url);
   const permitted=u.protocol==='https:' && !u.username && !u.password && (
-    u.hostname==='google.serper.dev' || u.hostname==='api.cloudflare.com' || u.hostname==='crt.sh' ||
+    u.hostname==='google.serper.dev' || u.hostname==='api.cloudflare.com' || u.hostname==='api.zyte.com' || u.hostname==='crt.sh' ||
     (u.hostname==='data.iana.org' && u.pathname==='/rdap/dns.json') || u.hostname==='rdap.verisign.com' || rdapOrigins.includes(u.origin));
   if(!permitted)throw new Error('تم منع اتصال غير مسموح');
-  const response=await fetch(url,{...init,redirect:'manual',signal:init.signal ?? AbortSignal.timeout(u.hostname==='crt.sh'?20000:u.hostname==='rdap.verisign.com'||rdapOrigins.includes(u.origin)?7000:20000)});
+  const response=await fetch(url,{...init,redirect:'manual',signal:init.signal ?? AbortSignal.timeout(u.hostname==='api.zyte.com'?45000:u.hostname==='crt.sh'?20000:u.hostname==='rdap.verisign.com'||rdapOrigins.includes(u.origin)?7000:20000)});
   if(u.hostname==='api.cloudflare.com' && (init.method ?? 'GET')==='GET')console.info(`Cloudflare ${u.pathname.split('/').at(-2)} HTTP ${response.status}`);
   return response;
 }
@@ -187,28 +188,54 @@ export async function searchEvidenceAnalysis(db:Db,link:Tables<'links'>) {
     return {status:'error'} as const;
   }
 }
-export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<typeof parseReport>,base:string,headers:Record<string,string>) {
-  const state=reportState(report,link.scan_started_at);
-  if(state==='scanning')return {status:'scanning'} as const;
-  const page=report.page;
-  if(state==='unscannable'||!page?.url)return searchEvidenceAnalysis(db,link);
-  const status=Number(page.status);
-  const es=await entities(db);const finalUrl=cleanUrl(page.url);const finalDomain=hostname(finalUrl);const redirect=finalDomain!==hostname(link.url)?[`الرابط يحوّل إلى نطاق آخر: ${finalDomain}`]:[];
-  const hosting={ip:page.ip ?? null,asn:page.asn!==undefined?String(page.asn):null,asnname:page.asnname ?? null,country:page.country ?? null,server:page.server ?? null,tls_issuer:page.tlsIssuer ?? null,status:Number.isFinite(status)?status:null};
-  if(isRemovedPage({status:Number.isFinite(status)?status:null,finalUrl,redirected:finalUrl!==cleanUrl(link.url),title:page.title ?? null})) {
-    const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {status:'scanning'} as const;
-    must(await db.from('links').update({final_url:finalUrl}).eq('id',link.id));
-    must(await db.from('analyses').upsert({link_id:link.id,cf_scan_uuid:link.scan_uuid,page_title:page.title ?? '',outgoing_domains:[],phones_found:[],signals:{removed:true},hosting,score:0,level:'yellow',reasons_ar:['الصفحة محذوفة أو موقوفة وقت الفحص',...redirect],ai_summary_ar:''},{onConflict:'link_id'}));
-    must(await db.from('links').update({status:'removed'}).eq('id',link.id));
-    return {status:'removed'} as const;
+export type Unscannable=()=>Promise<{status:string}>;
+type Hosting={ip:string|null;asn:string|null;asnname:string|null;country:string|null;server:string|null;tls_issuer:string|null;status:number|null};
+/** Shared checks after any scanner opened a page: removed/dead, HTTP error, shortener, official destination, analysis claim. */
+export async function pageGate(db:Db,link:Tables<'links'>,es:Entity[],p:{finalUrl:string;title:string;status:number|null;hosting:Hosting;scanner:'cloudflare'|'zyte_ae';capturedAt:string;onUnscannable:Unscannable}):Promise<{result:{status:string}}|{redirect:string[]}>{
+  const finalDomain=hostname(p.finalUrl);const redirect=finalDomain!==hostname(link.url)?[`الرابط يحوّل إلى نطاق آخر: ${finalDomain}`]:[];
+  const zyte=p.scanner==='zyte_ae';
+  if(isRemovedPage({status:p.status,finalUrl:p.finalUrl,redirected:p.finalUrl!==cleanUrl(link.url),title:p.title||null})) {
+    const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {result:{status:'scanning'}};
+    must(await db.from('links').update({final_url:p.finalUrl}).eq('id',link.id));
+    must(await db.from('analyses').upsert({link_id:link.id,cf_scan_uuid:link.scan_uuid,page_title:p.title,outgoing_domains:[],phones_found:[],signals:{removed:true},hosting:p.hosting,score:0,level:'yellow',reasons_ar:['الصفحة محذوفة أو موقوفة وقت الفحص',...redirect,...(zyte?[zyteSuccessReason]:[])],ai_summary_ar:'',scanner:p.scanner,captured_at:p.capturedAt},{onConflict:'link_id'}));
+    must(await db.from('links').update({status:'removed',...(zyte?{scan_error:null}:{})}).eq('id',link.id));
+    return {result:{status:'removed'}};
   }
-  if(status>=400)return searchEvidenceAnalysis(db,link);
-  if(isShortener(hostname(link.url))&&isShortener(finalDomain))return searchEvidenceAnalysis(db,link);
-  const chain=redirectChain(report);
-  must(await db.from('links').update({final_url:finalUrl,domain:finalDomain,platform:platformFor(finalDomain)}).eq('id',link.id));
+  if(p.status!==null&&p.status>=400)return {result:await p.onUnscannable()};
+  if(isShortener(hostname(link.url))&&isShortener(finalDomain))return {result:await searchEvidenceAnalysis(db,link)};
+  must(await db.from('links').update({final_url:p.finalUrl,domain:finalDomain,platform:platformFor(finalDomain)}).eq('id',link.id));
   const official=officialDestination(finalDomain,es);
-  if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);return {status:'official'} as const;}
-  const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {status:'scanning'} as const;
+  if(official){await officialAnalysis(db,link.id,official.reason,official.entity?.id ?? null,link.scan_uuid,redirect);if(zyte)must(await db.from('links').update({scan_error:null}).eq('id',link.id));return {result:{status:'official'}};}
+  const claimed=must(await db.rpc('claim_analysis',{_link_id:link.id}));if(!claimed)return {result:{status:'scanning'}};
+  return {redirect};
+}
+/** The single analysis and scoring pipeline for every scanner (Cloudflare and Zyte). */
+export async function scorePage(db:Db,link:Tables<'links'>,es:Entity[],c:{finalUrl:string;title:string;hosting:Hosting;text:string;domOk:boolean;reportText:string;hrefs:(string|undefined)[];linkDomains:string[];chain:string[];screenshot?:string;domReasons:string[];redirect:string[];scanner:'cloudflare'|'zyte_ae';capturedAt:string;extraReasons?:string[];keepShot?:(level:string)=>Promise<{path:string;sha:string}|null>;authHeader:string}) {
+  const finalDomain=hostname(c.finalUrl);
+  const outgoing=c.hrefs.flatMap(h=>{if(!h)return [];try{return [cleanUrl(new URL(h,c.finalUrl).href)];}catch{return [];}});
+  const outgoingDomains=[...new Set([...outgoing.map(hostname),...c.linkDomains])].filter(d=>d!==finalDomain);
+  const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform,c.authHeader);
+  const ai=await aiAnalyze({url:link.url,final_url:c.finalUrl,page_title:c.title,page_text:c.text,...(!c.domOk?{report_text:c.reportText}:{}),outgoing_domains:outgoingDomains,entities:es,...(c.screenshot?{screenshot:c.screenshot}:{})});
+  const destinations=classifyDestinations(outgoingDomains,finalDomain,es);
+  const base_scored=scoreFinding({url:c.finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[c.title,c.text,c.reportText,link.title,link.snippet],originUrl:link.url,ctFirstSeen:link.ct_first_seen});
+  const scored=applyOfficialDestinations(base_scored,destinations,platform,ai);const extra=scored===base_scored?[...c.redirect,...c.domReasons]:c.domReasons;
+  const shot=c.keepShot?await c.keepShot(scored.level):null;
+  must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:c.title,outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:{...scored.signals,asks_payment_or_card:ai.asks_payment_or_card,asks_sensitive_data:ai.asks_sensitive_data,...(c.chain.length>1?{redirect_chain:c.chain.join(' → ')}:{})},score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...extra,...(c.extraReasons ?? [])],ai_summary_ar:ai.summary_ar,hosting:c.hosting,scanner:c.scanner,captured_at:c.capturedAt,...(shot?{screenshot_path:shot.path,screenshot_sha256:shot.sha}:{}),indicators:buildIndicators({hrefs:c.hrefs,pageUrl:c.finalUrl,texts:[c.text,c.reportText,c.title,link.title,link.snippet,ai.summary_ar],aiPhones:ai.phones_found,aiAccounts:ai.bank_accounts ?? [],mapsPhone:link.maps_phone,officialDomains:es.flatMap(e=>e.official_domains)})}));
+  if(['linktree','wix','google_sites'].includes(platform) && link.hunt_id)for(const url of chainDestinations(outgoing.filter(u=>hostname(u)!==finalDomain),es,link.depth)) await addLink(db,{url,hunt_id:link.hunt_id,parent_link_id:link.id,depth:link.depth+1},es);
+  must(await db.from('links').update({status:'done',...(c.scanner==='zyte_ae'?{scan_error:null}:{})}).eq('id',link.id));
+  return {status:'done'} as const;
+}
+export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<typeof parseReport>,base:string,headers:Record<string,string>,onUnscannable:Unscannable=()=>searchEvidenceAnalysis(db,link)):Promise<{status:string}> {
+  const state=reportState(report,link.scan_started_at);
+  if(state==='scanning')return {status:'scanning'};
+  const page=report.page;
+  if(state==='unscannable'||!page?.url)return onUnscannable();
+  const status=Number(page.status);const capturedAt=new Date().toISOString();
+  const es=await entities(db);const finalUrl=cleanUrl(page.url);
+  const hosting:Hosting={ip:page.ip ?? null,asn:page.asn!==undefined?String(page.asn):null,asnname:page.asnname ?? null,country:page.country ?? null,server:page.server ?? null,tls_issuer:page.tlsIssuer ?? null,status:Number.isFinite(status)?status:null};
+  const g=await pageGate(db,link,es,{finalUrl,title:page.title ?? '',status:hosting.status,hosting,scanner:'cloudflare',capturedAt,onUnscannable});
+  if('result' in g)return g.result;
+  const chain=redirectChain(report);
   let domUrl=`${base}/dom/${link.scan_uuid}`;
   if(report.task?.domURL)try {
     const candidate=new URL(report.task.domURL);
@@ -225,18 +252,8 @@ export async function finalize(db:Db,link:Tables<'links'>,report:ReturnType<type
     if(shot.ok){const buf=await shot.arrayBuffer();if(buf.byteLength>0&&buf.byteLength<=4*1024*1024){let bin='';const bytes=new Uint8Array(buf);for(let i=0;i<bytes.length;i+=0x8000)bin+=String.fromCharCode(...bytes.subarray(i,i+0x8000));screenshot=`data:image/png;base64,${btoa(bin)}`;}}
   } catch { /* Continue without the screenshot. */ }
   const domReasons=screenshot?['التحليل مبني على لقطة الشاشة والعنوان']:dom.ok?[]:['تعذر قراءة نص الصفحة من تقرير Cloudflare؛ التحليل مبني على العنوان والروابط فقط'];
-  const outgoing=(report.data?.links ?? []).flatMap(l=>{if(!l.href)return [];try{return [cleanUrl(new URL(l.href,finalUrl).href)];}catch{return [];}});
-  const outgoingDomains=[...new Set([...outgoing.map(hostname),...(report.lists?.linkDomains ?? [])])].filter(d=>d!==finalDomain);
-  const platform=platformFor(finalDomain);const age=await domainAge(db,finalDomain,platform,headers['Authorization'] ?? '');
   const reportText=[page.text,report.data?.text,report.data?.pageText,...(report.data?.links ?? []).map(l=>l.text)].filter(Boolean).join(' ').slice(0,6000);
-  const ai=await aiAnalyze({url:link.url,final_url:finalUrl,page_title:page.title ?? '',page_text:text,...(!dom.ok?{report_text:reportText}:{}),outgoing_domains:outgoingDomains,entities:es,...(screenshot?{screenshot}:{})});
-  const destinations=classifyDestinations(outgoingDomains,finalDomain,es);
-  const base_scored=scoreFinding({url:finalUrl,entities:es,ai,age:age.domain_age_days,mapsPhone:link.maps_phone,platform,parent:await parentSuspicion(db,link,es),evidenceText:[page.title,text,reportText,link.title,link.snippet],originUrl:link.url,ctFirstSeen:link.ct_first_seen});
-  const scored=applyOfficialDestinations(base_scored,destinations,platform,ai);const extra=scored===base_scored?[...redirect,...domReasons]:domReasons;
-  must(await db.from('analyses').insert({link_id:link.id,cf_scan_uuid:link.scan_uuid,impersonated_entity_id:scored.entity?.id ?? null,...age,page_title:page.title ?? '',outgoing_domains:outgoingDomains,phones_found:scored.phones,signals:{...scored.signals,asks_payment_or_card:ai.asks_payment_or_card,asks_sensitive_data:ai.asks_sensitive_data,...(chain.length>1?{redirect_chain:chain.join(' → ')}:{})},score:scored.score,level:scored.level,reasons_ar:[...scored.reasons_ar,...extra],ai_summary_ar:ai.summary_ar,hosting,indicators:buildIndicators({hrefs:(report.data?.links ?? []).map(l=>l.href),pageUrl:finalUrl,texts:[text,reportText,page.title,link.title,link.snippet,ai.summary_ar],aiPhones:ai.phones_found,aiAccounts:ai.bank_accounts ?? [],mapsPhone:link.maps_phone,officialDomains:es.flatMap(e=>e.official_domains)})}));
-  if(['linktree','wix','google_sites'].includes(platform) && link.hunt_id)for(const url of chainDestinations(outgoing.filter(u=>hostname(u)!==finalDomain),es,link.depth)) await addLink(db,{url,hunt_id:link.hunt_id,parent_link_id:link.id,depth:link.depth+1},es);
-  must(await db.from('links').update({status:'done'}).eq('id',link.id));
-  return {status:'done'} as const;
+  return scorePage(db,link,es,{finalUrl,title:page.title ?? '',hosting,text,domOk:dom.ok,reportText,hrefs:(report.data?.links ?? []).map(l=>l.href),linkDomains:report.lists?.linkDomains ?? [],chain,...(screenshot?{screenshot}:{}),domReasons,redirect:g.redirect,scanner:'cloudflare',capturedAt,authHeader:headers['Authorization'] ?? ''});
 }
 
 /** Early detection: new certificates for a brand keyword in Certificate Transparency (crt.sh), last 14 days, max 40 domains. */

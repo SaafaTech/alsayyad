@@ -27,6 +27,9 @@ export const pollScan=createServerFn({method:'POST'}).middleware([requireSupabas
 // Archive the latest analysis, return the link and its direct children to the normal queue.
 export const rescanLink=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>({count:must(await context.supabase.rpc('rescan_link',{_link_id:data.link_id}))}));
 export const screenshotProxy=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).inputValidator(linkIdSchema).handler(async({data,context})=>{await requireInvestigator(context.supabase,context.userId);
+  // Stored Zyte (AE) capture: served from the private evidence bucket under the same investigator check.
+  const stored=must(await context.supabase.from('analyses').select('screenshot_path').eq('link_id',data.link_id).maybeSingle());
+  if(stored?.screenshot_path){const { supabaseAdmin }=await import('@/integrations/supabase/client.server');const f=await supabaseAdmin.storage.from('evidence').download(stored.screenshot_path);if(!f.data)return null;const b=new Uint8Array(await f.data.arrayBuffer());if(b.length>5000000)return null;let x='';for(let i=0;i<b.length;i+=8192)x+=String.fromCharCode(...b.subarray(i,i+8192));return `data:image/jpeg;base64,${btoa(x)}`;}
   const account=process.env['CLOUDFLARE_ACCOUNT_ID'],token=process.env['CLOUDFLARE_API_TOKEN'];if(!account||!token)throw new Error('إعدادات Cloudflare غير مكتملة');
   const link=requireData(await context.supabase.from('links').select('scan_uuid,status').eq('id',data.link_id).single());if(!link.scan_uuid||!['done','official'].includes(link.status))return null;
   const r=await providerFetch(`${cfBase(account)}/screenshots/${link.scan_uuid}.png`,{headers:cfGetHeaders(token)});if(!r.ok)return null;

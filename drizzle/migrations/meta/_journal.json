@@ -113,6 +113,20 @@
       "when": 1795715038670,
       "tag": "0015_auto_hunt",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795812450490,
+      "tag": "0016_zyte_fallback",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795812458467,
+      "tag": "0017_zyte_attempts_link_idx",
+      "breakpoints": true
     }
   ]
 }

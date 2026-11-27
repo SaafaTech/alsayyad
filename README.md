@@ -43,6 +43,8 @@ Official filter ── 26 UAE entities, *.gov.ae, 41 well-known UAE banks / reta
         ▼
 Isolated scan (Cloudflare URL Scanner): the page is visited from Cloudflare's
 infrastructure — Sayyad's server never contacts a suspicious site.
+Fallback only when Cloudflare cannot open the page or refuses it: Zyte API
+opens it from inside the UAE in Zyte's own isolated browser (capture only).
         │
         ▼
 Analysis
@@ -139,6 +141,7 @@ Capped at 100; the two impersonation rows never add up. Safety rules:
 | **Lovable Cloud** (Postgres with row-level security, auth, private storage) | Team accounts only, every table behind RLS and an investigator role, private storage for evidence. |
 | **Serper** (Google Search and Maps API) | The same results a victim in the UAE sees (`gl=ae`, Arabic or English), including ads and Maps phone numbers. |
 | **Cloudflare URL Scanner** | The legal and safety core: pages are visited from Cloudflare's isolated infrastructure; our server never contacts a suspicious site. |
+| **Zyte API (in-UAE fallback)** | Used only when Cloudflare cannot open or refuses a page (many UAE-targeting pages answer only UAE visitors). Zyte, an isolated third-party browser, opens the page with UAE geolocation and returns the HTML and one screenshot; no clicks, typing or scripts. Daily cap (default 30, Asia/Dubai day), at most one call per automatic worker run, retried up to 3 times within 6 hours. The result goes through the same scoring; the screenshot is kept (with SHA-256) only for yellow/red. |
 | **crt.sh (Certificate Transparency)** | Early detection: domains imitating UAE brands are found when their certificate is issued (last 14 days) — before they appear in search. |
 | **RDAP (IANA bootstrap, Verisign)** | Official registration date, registrar and abuse contact for takedown requests. |
 | **LLM `openai/gpt-6-astra` via the Lovable AI gateway** | Reads Arabic and English page text, or the screenshot when text is missing; returns a strict, schema-validated function call. Page content is treated as untrusted evidence, never as instructions. |
@@ -147,10 +150,11 @@ Capped at 100; the two impersonation rows never add up. Safety rules:
 | **Vitest** | 181 unit tests on the scoring rules, URL analysis, indicators, campaigns and parsing. |
 
 **Cost:** about **$0.0023 per analysed link** (search + AI), an estimate from provider pricing.
+**Zyte (fallback only):** pay-as-you-go; Zyte charges only successful responses. Observed (not a quote): about **$8.52 per 1,000 browser requests** for an extended-geolocation page on 28 Nov 2026.
 
 ## 5. Privacy, security and legality by design
 
-- **Passive only.** No login, no form submission, no vulnerability probing on any site. All investigation HTTP goes through one transport (`providerFetch`) that only allows Serper, the Cloudflare URL Scanner API, crt.sh, the IANA RDAP bootstrap and RDAP registries, and never follows redirects. The AI is reached only through the Lovable AI gateway.
+- **Passive only.** No login, no form submission, no vulnerability probing on any site. All investigation HTTP goes through one transport (`providerFetch`) that only allows Serper, the Cloudflare URL Scanner API, the Zyte API, crt.sh, the IANA RDAP bootstrap and RDAP registries, and never follows redirects. The AI is reached only through the Lovable AI gateway. Zyte, like Cloudflare, is an isolated third-party browser that visits the page itself; Sayyad's server still never contacts a suspicious site, and the returned HTML is treated as untrusted evidence.
 - **No victim data.** No user profiles; investigators are identified by auth ID only. The AI is instructed never to output names or personal details of people. Bank accounts are never included in awareness messages or takedown requests.
 - **Manual links are sanitised**: query string and fragment are removed before a public scan, because a pasted link can carry personal tokens.
 - **Evidence integrity**: original screenshot stored unchanged with SHA-256; evidence files cannot be edited (database trigger); every view, export and review is written to an insert-only chain-of-custody log; search phrases can be paused but not deleted.
@@ -188,7 +192,7 @@ Capped at 100; the two impersonation rows never add up. Safety rules:
 - **Schedule:** a full search sweep daily at 03:00 Dubai, a certificate-log sweep every 6 hours, and a scan worker every 5 minutes. Long sweeps continue in small chunks on each worker run.
 - **Cap:** at most the daily cap of new automatic links per Dubai day (default 100, owner-adjustable 10–500). The owner can switch the automatic hunt off at any time.
 - **Cost control:** already-analysed URLs are never added again, and neither are already-analysed domains, except on free/shared platforms and shorteners, where only the exact URL counts. The worker exits immediately when there is nothing to do.
-- **Passive only:** the same allowlisted providers (Serper, Cloudflare URL Scanner, RDAP, crt.sh, Lovable AI) and the same scoring. Nothing logs in, submits forms or probes the sites.
+- **Passive only:** the same allowlisted providers (Serper, Cloudflare URL Scanner, Zyte API as fallback, RDAP, crt.sh, Lovable AI) and the same scoring. Nothing logs in, submits forms or probes the sites.
 - **Privacy:** yellow/red results get an evidence file automatically with a custody entry marked "auto". No personal data is collected.
 
 ## Repository map
@@ -210,7 +214,7 @@ Data: the 26-entity registry and the search phrases ship as migrations. The spec
 1. Clone this repository (branch `main`).
 2. Install: `bun install`
 3. Create a Lovable Cloud / Supabase project and apply the SQL migrations in `drizzle/migrations/` in order (tables, RLS policies, investigator role, scan lock, evidence immutability, the entity registry and search phrases).
-4. Set server secrets: `SERPER_API_KEY`, `CLOUDFLARE_API_TOKEN` (URL Scanner permission), `CLOUDFLARE_ACCOUNT_ID`, plus the Supabase variables (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`). The AI runs through the Lovable AI gateway.
+4. Set server secrets: `SERPER_API_KEY`, `CLOUDFLARE_API_TOKEN` (URL Scanner permission), `CLOUDFLARE_ACCOUNT_ID`, optionally `ZYTE_API_KEY` (in-UAE fallback scanner), plus the Supabase variables (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`). The AI runs through the Lovable AI gateway.
 5. Run: `bun run dev`. An administrator creates accounts and grants the `investigator` role; then type a search phrase or paste a link.
 6. Tests: `bun run test`
 
@@ -220,7 +224,7 @@ Data: the 26-entity registry and the search phrases ship as migrations. The spec
 |---|---|
 | React, TanStack Start/Router/Query, Tailwind CSS, shadcn/ui, Radix UI, Recharts, Zod, tldts, fastest-levenshtein, lucide-react, date-fns, sonner, and other UI packages (cmdk, vaul, embla-carousel, react-hook-form, react-day-picker, input-otp, class-variance-authority, clsx, tailwind-merge) | MIT |
 | Reem Kufi, IBM Plex Sans Arabic, IBM Plex Mono (Google Fonts) | SIL Open Font License 1.1 |
-| Serper API, Cloudflare URL Scanner, Lovable AI gateway | Used under each provider's terms of service |
+| Serper API, Cloudflare URL Scanner, Zyte API, Lovable AI gateway | Used under each provider's terms of service |
 | IANA RDAP bootstrap, RDAP registries, crt.sh | Public registry data |
 | Official entity registry and allow-list | Compiled by the team from each organisation's official website |
 | Awareness reporting channels (Aman 8002626, SMS 2828) | Abu Dhabi Police public announcements |

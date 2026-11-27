@@ -1,0 +1,1 @@
+CREATE INDEX zyte_attempts_link_idx ON public.zyte_attempts(link_id);
