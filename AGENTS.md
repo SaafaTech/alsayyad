@@ -30,7 +30,7 @@ use the editor.
 <!-- LOVABLE:END -->
 
 ## Sayyad architecture
-- Auto hunt runs from /api/public/cron/* routes sharing the same search/scan/evidence cores as the UI server functions; daily cap + dedupe (full URL only on free/shared platforms and shorteners) control cost; evidence is auto-created only for yellow/red; long sweeps continue in chunks via an engine_cache cursor because cron calls must return quickly.
+- Auto hunt runs from authenticated /api/public/cron/* routes sharing UI search/scan/evidence cores; daily cap and dedupe (full URL only on shared platforms/shorteners) control cost. Sweep entry points only create runs/cursors; workers clean stale runs even when disabled, poll scans before starting scans and filing yellow/red evidence, then continue sweeps only with at least 20 seconds left, checkpointing the cursor and run totals after every item (success or error) to preserve progress across interrupted requests.
 - Keep pure domain/scoring rules in src/lib/sayyad/rules.ts and investigation transport in engine.server.ts; this makes passive-only behavior and scoring testable.
 - Start Cloudflare scans with a database claim, then poll from a sequential browser queue; this prevents long server waits and concurrent scan starts.
 - Store only derived investigation evidence, not raw DOM or screenshots; screenshots are retrieved through an authenticated Cloudflare-only proxy.

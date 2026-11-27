@@ -2,7 +2,7 @@ import { search, ctWatch, must, requireData, type Db } from './engine.server';
 import { scanLinkCore, pollScanCore } from './scan.server';
 import { createEvidenceCore } from './evidence.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
-import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows, fetchAllPages } from './auto';
+import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows, fetchAllPages, checkpointItems, staleAutoRuns } from './auto';
 import { canCreateEvidence } from './evidence';
 import type { Json } from '@/integrations/supabase/types';
 type Kind='search'|'ct'|'worker';
@@ -25,7 +25,8 @@ async function finishRun(db:Db,id:string,patch:{new_links?:number;scanned?:numbe
   must(await db.from('auto_runs').update({...rest,...(errors?{errors:errors as unknown as Json}:{}),...(done?{finished_at:new Date().toISOString()}:{})}).eq('id',id));
 }
 /** One chunk of a search/CT sweep. The cursor lives in engine_cache (service only) so later worker runs continue it. */
-async function step(db:Db,kind:'search'|'ct',owner:string,cap:number){
+async function step(db:Db,kind:'search'|'ct',owner:string,cap:number,left:()=>number){
+  if(left()<20000)return false;
   const row=must(await db.from('engine_cache').select('value').eq('key',CURSOR[kind]).maybeSingle());
   if(!row)return false;
   const cur=row.value as {i:number;run_id:string};
@@ -35,46 +36,56 @@ async function step(db:Db,kind:'search'|'ct',owner:string,cap:number){
   const g=await gate(db,cap);const run=requireData(await db.from('auto_runs').select('new_links,errors').eq('id',cur.run_id).single());
   let added=0;const errors=Array.isArray(run.errors)?[...run.errors as string[]]:[];
   const key=process.env['SERPER_API_KEY'];
-  for(const item of items.slice(cur.i,cur.i+CHUNK)){
-    if(g.full)break;
-    try{
+  const next=await checkpointItems({items,start:cur.i,limit:CHUNK,left,full:()=>g.full,
+    execute:async item=>{
       if(kind==='search'){if(!key)throw new Error('SERPER_API_KEY missing');for(const src of ['google','maps'] as const)added+=(await search(db,owner,item,src,key,{trigger:'auto',allow:u=>g.allow(u)})).results_count;}
       else added+=(await ctWatch(db,owner,item,{trigger:'auto',allow:u=>g.allow(u)})).found;
-    }catch(e){errors.push(`${item}: ${msg(e)}`);}
-  }
-  const next=cur.i+CHUNK,over=g.full||next>=items.length;
+    },onError:(item,e)=>{errors.push(`${item}: ${msg(e)}`);},
+    save:async next=>{
+      must(await db.from('engine_cache').update({value:{i:next,run_id:cur.run_id}}).eq('key',CURSOR[kind]));
+      await finishRun(db,cur.run_id,{new_links:run.new_links+added,errors,status:'running',done:false});
+    }});
+  const over=g.full||next>=items.length;
   await finishRun(db,cur.run_id,{new_links:run.new_links+added,errors,status:over?(g.full?'cap_reached':'done'):'running',done:over});
   if(over)must(await db.from('engine_cache').delete().eq('key',CURSOR[kind]));
-  else must(await db.from('engine_cache').update({value:{i:next,run_id:cur.run_id}}).eq('key',CURSOR[kind]));
   return true;
 }
-/** Starts a search or CT sweep and runs its first chunk. */
+/** Starts a sweep without provider calls; workers perform every chunk. */
 export async function startSweep(kind:'search'|'ct'){
   const db=await admin();const s=await settings(db);if(!autoAllowed(s))return {skipped:'disabled'};
   const run_id=await startRun(db,kind);
   must(await db.from('engine_cache').upsert({key:CURSOR[kind],value:{i:0,run_id},expires_at:new Date(Date.now()+20*3600000).toISOString()},{onConflict:'key'}));
-  await step(db,kind,s.owner_user_id,s.daily_cap);
   return {run_id};
+}
+async function cleanupStaleRuns(db:Db){
+  const cursors=requireData(await db.from('engine_cache').select('key,value').in('key',[CURSOR.search,CURSOR.ct]));
+  const runs=await fetchAllPages(async(f,t)=>requireData(await db.from('auto_runs').select('id,kind,status,started_at,errors').eq('status','running').order('id').range(f,t)));
+  for(const run of staleAutoRuns(runs,cursors,Date.now())){
+    const errors=Array.isArray(run.errors)?[...run.errors]:[];
+    await finishRun(db,run.id,{status:'failed',errors:[...errors,'timed out'] as string[]});
+  }
 }
 /** Continues sweeps, polls running auto scans, starts up to 3 new ones and files evidence for yellow/red. */
 export async function runWorker(budgetMs=50000){
   const t0=Date.now(),left=()=>budgetMs-(Date.now()-t0);
-  const db=await admin();const s=await settings(db);if(!autoAllowed(s))return {skipped:'disabled'};
+  const db=await admin();await cleanupStaleRuns(db);const s=await settings(db);if(!autoAllowed(s))return {skipped:'disabled'};
   const cursors=requireData(await db.from('engine_cache').select('key').in('key',[CURSOR.search,CURSOR.ct]));
-  const queue=requireData(await db.from('links').select('id,status,first_seen_at,hunts!inner(trigger,source)').eq('hunts.trigger','auto').neq('hunts.source','expert_sample').in('status',['pending','scanning']).order('first_seen_at').limit(50));
-  if(!cursors.length&&!queue.length)return {skipped:'empty'};
+  const queueFor=(status:'pending'|'scanning')=>db.from('links').select('id,status,first_seen_at,hunts!inner(trigger,source)').eq('hunts.trigger','auto').neq('hunts.source','expert_sample').eq('status',status).order('first_seen_at').limit(50);
+  const scanning=requireData(await queueFor('scanning'));
+  const pending=requireData(await queueFor('pending'));
+  if(!cursors.length&&!scanning.length&&!pending.length)return {skipped:'empty'};
   const run=await startRun(db,'worker');const errors:string[]=[];let scanned=0,red=0,yellow=0;
-  for(const c of cursors)try{await step(db,c.key===CURSOR.search?'search':'ct',s.owner_user_id,s.daily_cap);}catch(e){errors.push(msg(e));}
   const finished:string[]=[];
-  for(const l of queue.filter(l=>l.status==='scanning')){if(left()<15000)break;try{const r=await pollScanCore({link_id:l.id},{supabase:db});if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
+  for(const l of scanning){if(left()<15000)break;try{const r=await pollScanCore({link_id:l.id},{supabase:db});if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
   let started=0;
-  for(const l of queue.filter(l=>l.status==='pending')){if(started>=3||left()<10000)break;try{const r=await scanLinkCore(db,l.id);if(r.status==='waiting')break;if(r.started)started++;else if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
+  for(const l of pending){if(started>=3||left()<10000)break;try{const r=await scanLinkCore(db,l.id);if(r.status==='waiting')break;if(r.started)started++;else if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
   for(const id of finished){
     const a=must(await db.from('analyses').select('level').eq('link_id',id).maybeSingle());if(!a)continue;scanned++;
     if(a.level==='red')red++;else if(a.level==='yellow')yellow++;
     if(canCreateEvidence(a.level)&&left()>5000)try{await createEvidenceCore(db,s.owner_user_id,id,{actor:s.owner_user_id,detail:'auto'});}catch(e){errors.push(msg(e));}
   }
   if(finished.length)await maybeRebuildCampaigns(db);
+  for(const c of cursors){if(left()<20000)break;try{await step(db,c.key===CURSOR.search?'search':'ct',s.owner_user_id,s.daily_cap,left);}catch(e){errors.push(msg(e));}}
   await finishRun(db,run,{scanned,red,yellow,errors,status:errors.length?'partial':'done'});
   return {run_id:run,scanned,started};
 }

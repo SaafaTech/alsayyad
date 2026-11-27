@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { autoAllowed, autoGate, seenFrom, alreadyAnalysed, withoutExpertRows, ctAutoKeywords, fetchAllPages } from '@/lib/sayyad/auto';
+import { autoAllowed, autoGate, seenFrom, alreadyAnalysed, withoutExpertRows, ctAutoKeywords, fetchAllPages, checkpointItems, staleAutoRuns } from '@/lib/sayyad/auto';
 const none=()=>seenFrom([]);
 describe('automatic hunt rules', () => {
   it('stops adding links at the daily cap', () => {
@@ -49,5 +49,37 @@ describe('automatic hunt rules', () => {
     const rows=await fetchAllPages(async(f,t)=>{calls.push([f,t]);return data.slice(f,t+1);},3);
     expect(rows).toEqual(data);
     expect(calls).toEqual([[0,2],[3,5],[6,8]]);
+  });
+  it('saves each successful or failed item before running the next', async () => {
+    const events:string[]=[];const errors:string[]=[];
+    const next=await checkpointItems({items:['one','two','three'],start:0,limit:2,left:()=>50000,full:()=>false,
+      execute:async item=>{events.push(item);if(item==='two')throw new Error('failure');},
+      onError:item=>{errors.push(item);},save:async i=>{events.push(`save ${i}`);}});
+    expect(events).toEqual(['one','save 1','two','save 2']);expect(errors).toEqual(['two']);expect(next).toBe(2);
+  });
+  it('leaves the cursor at the completed item when less than 20 seconds remain', async () => {
+    let remaining=20000;const saved:number[]=[];
+    const next=await checkpointItems({items:['one','two'],start:0,limit:2,left:()=>remaining,full:()=>false,
+      execute:async()=>{remaining=19999;},onError:()=>{},save:async i=>{saved.push(i);}});
+    expect(next).toBe(1);expect(saved).toEqual([1]);
+  });
+  it('does not repeat a checkpointed item after interruption', async () => {
+    let cursor=0;const executed:string[]=[];
+    const options={items:['one','two'],limit:2,left:()=>50000,full:()=>false,execute:async(item:string)=>{executed.push(item);},onError:()=>{}};
+    await expect(checkpointItems({...options,start:cursor,save:async i=>{cursor=i;throw new Error('interrupted');}})).rejects.toThrow('interrupted');
+    await checkpointItems({...options,start:cursor,save:async i=>{cursor=i;}});
+    expect(executed).toEqual(['one','two']);expect(cursor).toBe(2);
+  });
+  it('marks only running workers older than ten minutes as stale', () => {
+    const now=Date.parse('2026-11-27T02:31:00Z');
+    const runs=[{id:'old',kind:'worker',status:'running',started_at:'2026-11-27T02:20:59Z'},
+      {id:'boundary',kind:'worker',status:'running',started_at:'2026-11-27T02:21:00Z'},
+      {id:'finished',kind:'worker',status:'done',started_at:'2026-11-27T01:00:00Z'}];
+    expect(staleAutoRuns(runs,[],now).map(r=>r.id)).toEqual(['old']);
+  });
+  it('marks orphaned search and CT runs stale, retaining the cursor owner', () => {
+    const runs=['search','ct'].flatMap(kind=>['old','current'].map(suffix=>({id:`${kind}-${suffix}`,kind,status:'running',started_at:'2026-11-27T00:00:00Z'})));
+    const cursors=[{key:'auto-search-cursor',value:{i:2,run_id:'search-current'}}];
+    expect(staleAutoRuns(runs,cursors,Date.now()).map(r=>r.id)).toEqual(['search-old','ct-old','ct-current']);
   });
 });

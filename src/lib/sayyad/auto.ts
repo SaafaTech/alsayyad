@@ -33,3 +33,21 @@ export async function fetchAllPages<T>(page:(from:number,to:number)=>Promise<T[]
   const out:T[]=[];
   for(let from=0;;from+=pageSize){const rows=await page(from,from+pageSize-1);out.push(...rows);if(rows.length<pageSize)return out;}
 }
+/** Checkpoint each completed item, including failures, before attempting the next one. */
+export async function checkpointItems<T>(options:{items:T[];start:number;limit:number;left:()=>number;full:()=>boolean;execute:(item:T)=>Promise<void>;onError:(item:T,error:unknown)=>void;save:(next:number)=>Promise<void>}){
+  let next=options.start;
+  while(next<options.items.length&&next-options.start<options.limit){
+    if(options.full()||options.left()<20000)break;
+    const item=options.items[next];if(item===undefined)break;
+    try{await options.execute(item);}catch(error){options.onError(item,error);}
+    next++;
+    await options.save(next);
+  }
+  return next;
+}
+/** A sweep cursor must belong to that run; a replacement cursor cannot keep an old run alive. */
+export function staleAutoRuns<T extends {id:string;kind:string;status:string;started_at:string}>(runs:T[],cursors:{key:string;value:unknown}[],now:number){
+  return runs.filter(run=>run.status==='running'&&(run.kind==='worker'
+    ?Date.parse(run.started_at)<now-10*60000
+    :(run.kind==='search'||run.kind==='ct')&&!cursors.some(cursor=>cursor.key===`auto-${run.kind}-cursor`&&typeof cursor.value==='object'&&cursor.value!==null&&'run_id' in cursor.value&&cursor.value.run_id===run.id)));
+}
