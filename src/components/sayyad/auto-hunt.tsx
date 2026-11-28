@@ -44,7 +44,8 @@ function RecheckRow({used,cap}:{used:number;cap:number}){const get=useServerFn(g
   async function go(){setBusy(true);try{const r=await run();toast.success(tf("أُعيد إدراج {0} رابط لإعادة الفحص",r.queued));await qc.invalidateQueries({queryKey:['zyte-recheck']});await qc.invalidateQueries({queryKey:['auto-state']});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر الحفظ"));}finally{setBusy(false);}}
   const remaining=q.data?.remaining;
   return <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-    <Button size="sm" variant="outline" className="text-foreground" disabled={busy||!remaining} onClick={()=>void go()}>{tr("إعادة فحص المقفول من داخل الإمارات (15 رابط)")}</Button>
+    <Button size="sm" variant="outline" className="text-foreground" disabled={busy||!remaining||used>=cap} onClick={()=>void go()}>{tr("إعادة فحص المقفول من داخل الإمارات (15 رابط)")}</Button>
     <span className="text-muted-foreground">{remaining===undefined?tr("جارٍ التحميل…"):tf("المتبقي المؤهل: {0}",remaining)}</span>
-    <span className="text-muted-foreground">{tf("فحوصات Zyte اليوم {0} / {1}",used,cap)}</span></div>;
+    <span className="text-muted-foreground">{tf("فحوصات Zyte اليوم {0} / {1}",used,cap)}</span>
+    {used>=cap&&<span className="text-muted-foreground">{tr("وصلنا حد Zyte اليومي؛ أعد المحاولة غداً أو ارفع الحد")}</span>}</div>;
 }

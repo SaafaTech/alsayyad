@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Tables } from '@/integrations/supabase/types';
 import { must, requireData, entities, providerFetch, searchEvidenceAnalysis, scanSubmissionUrl, pageGate, scorePage, type Db } from './engine.server';
 import { cleanUrl, hostname, isShortener } from './rules';
-import { zyteDecision, claimOutcome, failureKind, afterFailure, keepScreenshot, htmlText, htmlTitle, htmlHrefs, emptyCapture, zyteSuccessReason, isSocialForZyte, inRecheck, fallbackEnd, ZYTE_TIMEOUT_MS, type FallbackCtx } from './zyte';
+import { zyteDecision, claimOutcome, failureKind, afterFailure, keepScreenshot, htmlText, htmlTitle, htmlHrefs, emptyCapture, zyteSuccessReason, isSocialForZyte, inRecheck, fallbackEnd, recheckClearsMark, ZYTE_TIMEOUT_MS, type FallbackCtx } from './zyte';
 import { sha256 } from './evidence.server';
 const zyteSchema=z.object({url:z.string().optional(),statusCode:z.number().optional(),browserHtml:z.string().optional(),screenshot:z.string().optional()});
 type Extract={ok:true;data:z.infer<typeof zyteSchema>}|{ok:false;status:number|null};
@@ -29,7 +29,9 @@ export async function scanFallback(db:Db,link:Tables<'links'>,ctx:FallbackCtx={m
   const d=zyteDecision({configured:!!key,attempts:link.fallback_attempts,queuedAt:link.fallback_queued_at,now,mode:ctx.mode,left:ctx.left?ctx.left():Infinity,usedThisRun:ctx.used?.n ?? 0});
   if(d==='final'||!key)return end(link);
   if(d==='defer'){if(!link.fallback_queued_at)must(await db.from('links').update({fallback_queued_at:new Date(now).toISOString()}).eq('id',link.id));return {status:'scanning'};}
-  const claim=claimOutcome(must(await db.rpc('claim_zyte',{_link_id:link.id})) ?? 'denied');
+  const rawClaim=must(await db.rpc('claim_zyte',{_link_id:link.id})) ?? 'denied';
+  if(recheckClearsMark(recheck,rawClaim)){const r=await restoreRecheck(db,link.id);must(await db.from('links').update({zyte_recheck_at:null}).eq('id',link.id));return r;}
+  const claim=claimOutcome(rawClaim);
   if(claim==='wait')return {status:'scanning'};
   if(claim==='final')return end(link);
   if(ctx.used)ctx.used.n++;

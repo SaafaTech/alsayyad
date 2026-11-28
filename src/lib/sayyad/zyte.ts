@@ -59,6 +59,10 @@ export function inRecheck(l:{zyte_recheck_at:string|null;fallback_queued_at:stri
 /** When Zyte cannot give a result: a re-check restores the link with its old analysis; a first scan gets the search-evidence verdict. */
 export const fallbackEnd=(recheck:boolean):'restore'|'search_evidence'=>recheck?'restore':'search_evidence';
 export const RECHECK_BATCH=15;
+/** A re-check that never reached Zyte because the daily cap was used becomes eligible again; every other ending keeps the mark. */
+export const recheckClearsMark=(recheck:boolean,claim:string)=>recheck&&claim==='cap';
+/** Links one press may queue: at most 15 and never more than today's remaining Zyte attempts. */
+export const recheckBatchSize=(cap:number,used:number)=>Math.max(0,Math.min(RECHECK_BATCH,cap-used));
 export type RecheckCandidate={id:string;status:string;scan_error:string|null;zyte_recheck_at:string|null;platform:string;url:string;domain:string;first_seen_at:string;source:string|null;level:string|null;scanner:string|null;shortener:boolean};
 const LEVEL_RANK:Record<string,number>={red:0,yellow:1};
 const PLATFORM_RANK:Record<string,number>={other:0,vercel:1,pages_dev:2};

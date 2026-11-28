@@ -5,7 +5,7 @@ import { maybeRebuildCampaigns } from './campaigns.server';
 import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows, fetchAllPages, checkpointItems, staleAutoRuns } from './auto';
 import { canCreateEvidence } from './evidence';
 import { hostname, isShortener } from './rules';
-import { missingEvidence, recheckBatch, continueAfterZyte, inRecheck, scanQueue, type FallbackCtx } from './zyte';
+import { missingEvidence, recheckBatch, recheckBatchSize, continueAfterZyte, inRecheck, scanQueue, type FallbackCtx } from './zyte';
 import type { Json } from '@/integrations/supabase/types';
 type Kind='search'|'ct'|'worker';
 const CURSOR={search:'auto-search-cursor',ct:'auto-ct-cursor'} as const;
@@ -109,7 +109,11 @@ async function recheckCandidates(db:Db){
 }
 export async function recheckSummary(){const db=await admin();return recheckBatch(await recheckCandidates(db),Number.MAX_SAFE_INTEGER).length;}
 export async function requeueRecheck(){
-  const db=await admin();const batch=recheckBatch(await recheckCandidates(db));
+  const db=await admin();
+  const s=must(await db.from('auto_hunt_settings').select('zyte_daily_cap').eq('id',true).maybeSingle());
+  const used=must(await db.rpc('zyte_today')) ?? 0;
+  const size=recheckBatchSize(s?.zyte_daily_cap ?? 30,used);if(!size)return 0;
+  const batch=recheckBatch(await recheckCandidates(db),size);
   if(!batch.length)return 0;
   return must(await db.rpc('zyte_recheck_requeue',{_ids:batch.map(b=>b.id)})) ?? 0;
 }

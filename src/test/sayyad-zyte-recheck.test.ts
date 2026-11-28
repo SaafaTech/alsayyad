@@ -40,3 +40,15 @@ describe('re-check failure',()=>{
     expect(inRecheck({zyte_recheck_at:'2026-11-28T10:00:00Z',fallback_queued_at:null})).toBe(false);
   });
 });
+import { recheckClearsMark, recheckBatchSize } from '@/lib/sayyad/zyte';
+describe('re-check daily cap',()=>{
+  it('clears the re-check mark only when a re-check hits the cap',()=>{
+    expect(recheckClearsMark(true,'cap')).toBe(true);
+    for(const c of ['ok','busy','denied'])expect(recheckClearsMark(true,c)).toBe(false);
+    expect(recheckClearsMark(false,'cap')).toBe(false);
+  });
+  it('queues at most min(15, cap - used), never negative',()=>{
+    expect(recheckBatchSize(30,0)).toBe(15);expect(recheckBatchSize(30,20)).toBe(10);
+    expect(recheckBatchSize(30,30)).toBe(0);expect(recheckBatchSize(30,35)).toBe(0);
+  });
+});
