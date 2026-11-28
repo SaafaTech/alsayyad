@@ -5,9 +5,9 @@ const base={configured:true,attempts:0,queuedAt:null,now,mode:'manual' as const,
 describe('Zyte fallback decision',()=>{
   it('tries Zyte for a manual scan when configured',()=>expect(zyteDecision(base)).toBe('try'));
   it('finalises as today when Zyte is not configured',()=>expect(zyteDecision({...base,configured:false})).toBe('final'));
-  it('worker tries only with 40 s left and once per run',()=>{
+  it('worker tries only with 45 s left and once per run',()=>{
     expect(zyteDecision({...base,mode:'auto',left:45000})).toBe('try');
-    expect(zyteDecision({...base,mode:'auto',left:39000})).toBe('defer');
+    expect(zyteDecision({...base,mode:'auto',left:44000})).toBe('defer');
     expect(zyteDecision({...base,mode:'auto',left:50000,usedThisRun:1})).toBe('defer');
   });
 });

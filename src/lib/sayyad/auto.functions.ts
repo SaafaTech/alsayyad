@@ -3,6 +3,20 @@ import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
 import { requireInvestigator } from './role.server';
 import { must, requireData } from './engine.server';
+import { recheckSummary, requeueRecheck } from './auto.server';
+async function requireOwner(db:Parameters<typeof requireInvestigator>[0],userId:string){
+  await requireInvestigator(db,userId);
+  const s=must(await db.from('auto_hunt_settings').select('owner_user_id').eq('id',true).maybeSingle());
+  if(s?.owner_user_id!==userId)throw new Error('الإعداد متاح لصاحب الحساب المالك فقط');
+}
+/** Owner only: how many old unscannable links can still be re-checked through Zyte. */
+export const getRecheckState=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
+  await requireOwner(context.supabase,context.userId);return {remaining:await recheckSummary()};
+});
+/** Owner only: re-queue at most 15 eligible links for a one-time Zyte (AE) re-check by the worker. */
+export const startRecheck=createServerFn({method:'POST'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
+  await requireOwner(context.supabase,context.userId);return {queued:await requeueRecheck()};
+});
 export const getAutoState=createServerFn({method:'GET'}).middleware([requireSupabaseAuth]).handler(async({context})=>{
   const db=context.supabase;await requireInvestigator(db,context.userId);
   const since=new Date(Date.now()-86400000).toISOString();

@@ -23,7 +23,7 @@ function database(){
     const builder={
       select:(_columns:string)=>builder,
       eq:(key:string,value:unknown)=>{filters[key]=value;return builder;},
-      neq:()=>builder,in:()=>builder,gte:()=>builder,order:()=>builder,range:()=>builder,limit:()=>builder,
+      neq:()=>builder,in:()=>builder,gte:()=>builder,not:()=>builder,is:()=>builder,order:()=>builder,range:()=>builder,limit:()=>builder,
       single:()=>{single=true;return builder;},maybeSingle:()=>{single=true;return builder;},
       insert:(value:Record<string,unknown>)=>{operation='insert';patch=value;return builder;},
       update:(value:Record<string,unknown>)=>{operation='update';patch=value;return builder;},

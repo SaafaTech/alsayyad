@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { getAutoState, setAutoSettings } from '@/lib/sayyad/auto.functions';
+import { getAutoState, setAutoSettings, getRecheckState, startRecheck } from '@/lib/sayyad/auto.functions';
 const when=(s:string|null)=>s?new Date(s).toLocaleString('ar-AE',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
 function useAuto(){const f=useServerFn(getAutoState);return useQuery({queryKey:['auto-state'],queryFn:()=>f(),refetchInterval:30000});}
 const kindLabel:Record<string,string>={search:'بحث',ct:'سجلات الشهادات',worker:'فحص'};
@@ -34,6 +34,17 @@ export function AutoPanel(){const q=useAuto(),qc=useQueryClient(),save=useServer
     <div className="mt-3 flex flex-wrap items-center gap-4 text-sm"><span>{tf("فحوصات Zyte اليوم {0} / {1}",q.data.zyteToday,s.zyte_daily_cap)}</span>
       <label className="flex items-center gap-2">{tr("حد Zyte اليومي")}<Input type="number" min={0} max={500} className="w-24" dir="ltr" value={zcap} onChange={e=>setZcap(e.target.value)}/></label>
       <Button size="sm" variant="outline" className="text-foreground" disabled={!zOk||zN===s.zyte_daily_cap} onClick={()=>void put(s.enabled,s.daily_cap,zN)}>{tr("حفظ")}</Button></div>
+    <RecheckRow used={q.data.zyteToday} cap={s.zyte_daily_cap}/>
     {q.data.runs.length?<ul className="mt-3 space-y-1 text-sm">{q.data.runs.map(r=><li key={r.id} className="flex flex-wrap gap-2 text-muted-foreground"><span>{when(r.started_at)}</span><b className="text-foreground">{tr(kindLabel[r.kind] ?? r.kind)}</b><span>{tr(statusLabel[r.status] ?? r.status)}</span><span>{tf("{0} جديد • {1} فُحص • {2} خطر • {3} مراجعة",r.new_links,r.scanned,r.red,r.yellow)}</span></li>)}</ul>:<p className="mt-3 text-sm text-muted-foreground">{tr("لا توجد تشغيلات بعد")}</p>}
   </section>;
+}
+/** Owner-only: one-time re-check of old Cloudflare-unscannable links through Zyte (AE). */
+function RecheckRow({used,cap}:{used:number;cap:number}){const get=useServerFn(getRecheckState),run=useServerFn(startRecheck),qc=useQueryClient();
+  const q=useQuery({queryKey:['zyte-recheck'],queryFn:()=>get(),refetchInterval:60000});const[busy,setBusy]=useState(false);
+  async function go(){setBusy(true);try{const r=await run();toast.success(tf("أُعيد إدراج {0} رابط لإعادة الفحص",r.queued));await qc.invalidateQueries({queryKey:['zyte-recheck']});await qc.invalidateQueries({queryKey:['auto-state']});}catch(e){toast.error(e instanceof Error?e.message:tr("تعذر الحفظ"));}finally{setBusy(false);}}
+  const remaining=q.data?.remaining;
+  return <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+    <Button size="sm" variant="outline" className="text-foreground" disabled={busy||!remaining} onClick={()=>void go()}>{tr("إعادة فحص المقفول من داخل الإمارات (15 رابط)")}</Button>
+    <span className="text-muted-foreground">{remaining===undefined?tr("جارٍ التحميل…"):tf("المتبقي المؤهل: {0}",remaining)}</span>
+    <span className="text-muted-foreground">{tf("فحوصات Zyte اليوم {0} / {1}",used,cap)}</span></div>;
 }

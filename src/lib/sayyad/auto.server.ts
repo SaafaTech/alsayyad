@@ -4,7 +4,8 @@ import { createEvidenceCore } from './evidence.server';
 import { maybeRebuildCampaigns } from './campaigns.server';
 import { autoAllowed, autoGate, seenFrom, ctAutoKeywords, withoutExpertRows, fetchAllPages, checkpointItems, staleAutoRuns } from './auto';
 import { canCreateEvidence } from './evidence';
-import { missingEvidence, type FallbackCtx } from './zyte';
+import { hostname, isShortener } from './rules';
+import { missingEvidence, recheckBatch, continueAfterZyte, inRecheck, scanQueue, type FallbackCtx } from './zyte';
 import type { Json } from '@/integrations/supabase/types';
 type Kind='search'|'ct'|'worker';
 const CURSOR={search:'auto-search-cursor',ct:'auto-ct-cursor'} as const;
@@ -76,7 +77,10 @@ export async function runWorker(budgetMs=50000){
   const filed=recent.length?new Set(requireData(await db.from('evidence').select('link_id').in('link_id',recent.map(r=>r.link_id))).map(e=>e.link_id)):new Set<string>();
   const backfill=missingEvidence(recent.map(r=>({link_id:r.link_id,level:r.level,created_at:r.created_at,trigger:r.links.hunts.trigger,source:r.links.hunts.source})),filed,Date.now());
   const queueFor=(status:'pending'|'scanning')=>db.from('links').select('id,status,first_seen_at,hunts!inner(trigger,source)').eq('hunts.trigger','auto').neq('hunts.source','expert_sample').eq('status',status).order('first_seen_at').limit(50);
-  const scanning=requireData(await queueFor('scanning'));
+  // Owner re-checks through Zyte run whatever the hunt trigger; new links keep priority.
+  const fresh=requireData(await db.from('links').select('id,status,first_seen_at,zyte_recheck_at,fallback_queued_at,hunts!inner(trigger,source)').eq('hunts.trigger','auto').neq('hunts.source','expert_sample').eq('status','scanning').order('first_seen_at').limit(50));
+  const rechecks=requireData(await db.from('links').select('id,status,first_seen_at,zyte_recheck_at,fallback_queued_at').not('zyte_recheck_at','is',null).eq('status','scanning').order('zyte_recheck_at').limit(20)).filter(inRecheck);
+  const scanning=scanQueue<{id:string}>(fresh.filter(l=>!inRecheck(l)),rechecks);
   const pending=requireData(await queueFor('pending'));
   if(!cursors.length&&!scanning.length&&!pending.length&&!backfill.length)return {skipped:'empty'};
   const run=await startRun(db,'worker');const errors:string[]=[];let scanned=0,red=0,yellow=0;
@@ -86,14 +90,26 @@ export async function runWorker(budgetMs=50000){
   const ctx:FallbackCtx={mode:'auto',left,used:{n:0}};
   for(const l of scanning){if(left()<15000)break;try{const r=await pollScanCore({link_id:l.id},{supabase:db},ctx);if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
   let started=0;
-  for(const l of pending){if(started>=3||left()<10000)break;try{const r=await scanLinkCore(db,l.id,ctx);if(r.status==='waiting')break;if(r.started)started++;else if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
+  for(const l of pending){if(started>=3||left()<10000||!continueAfterZyte(ctx.used))break;try{const r=await scanLinkCore(db,l.id,ctx);if(r.status==='waiting')break;if(r.started)started++;else if(r.status!=='scanning')finished.push(l.id);}catch(e){errors.push(msg(e));}}
   for(const id of finished){
     const a=must(await db.from('analyses').select('level').eq('link_id',id).maybeSingle());if(!a)continue;scanned++;
     if(a.level==='red')red++;else if(a.level==='yellow')yellow++;
     if(canCreateEvidence(a.level)&&left()>5000)try{await createEvidenceCore(db,s.owner_user_id,id,{actor:s.owner_user_id,detail:'auto'});}catch(e){errors.push(msg(e));}
   }
   if(finished.length)await maybeRebuildCampaigns(db);
-  for(const c of cursors){if(left()<20000)break;try{await step(db,c.key===CURSOR.search?'search':'ct',s.owner_user_id,s.daily_cap,left);}catch(e){errors.push(msg(e));}}
+  for(const c of cursors){if(left()<20000||!continueAfterZyte(ctx.used))break;try{await step(db,c.key===CURSOR.search?'search':'ct',s.owner_user_id,s.daily_cap,left);}catch(e){errors.push(msg(e));}}
   await finishRun(db,run,{scanned,red,yellow,errors,status:errors.length?'partial':'done'});
   return {run_id:run,scanned,started};
+}
+/** Old unscannable links an owner may send once through Zyte, filtered and ordered by recheckBatch. */
+async function recheckCandidates(db:Db){
+  const rows=await fetchAllPages(async(f,t)=>requireData(await db.from('links').select('id,status,scan_error,zyte_recheck_at,platform,url,domain,first_seen_at,hunts(source),analyses(level,scanner)').eq('status','done').not('scan_error','is',null).is('zyte_recheck_at',null).order('id').range(f,t)));
+  return rows.map(r=>{const a=Array.isArray(r.analyses)?r.analyses[0]:r.analyses;const h=Array.isArray(r.hunts)?r.hunts[0]:r.hunts;
+    return {id:r.id,status:r.status,scan_error:r.scan_error,zyte_recheck_at:r.zyte_recheck_at,platform:r.platform,url:r.url,domain:hostname(r.url) || r.domain,first_seen_at:r.first_seen_at,source:h?.source ?? null,level:a?.level ?? null,scanner:a?.scanner ?? null,shortener:isShortener(hostname(r.url))};});
+}
+export async function recheckSummary(){const db=await admin();return recheckBatch(await recheckCandidates(db),Number.MAX_SAFE_INTEGER).length;}
+export async function requeueRecheck(){
+  const db=await admin();const batch=recheckBatch(await recheckCandidates(db));
+  if(!batch.length)return 0;
+  return must(await db.rpc('zyte_recheck_requeue',{_ids:batch.map(b=>b.id)})) ?? 0;
 }

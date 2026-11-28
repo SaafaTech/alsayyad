@@ -581,6 +581,7 @@ export type Database = {
           status: string
           title: string
           url: string
+          zyte_recheck_at: string | null
           zyte_started_at: string | null
         }
         Insert: {
@@ -606,6 +607,7 @@ export type Database = {
           status?: string
           title?: string
           url: string
+          zyte_recheck_at?: string | null
           zyte_started_at?: string | null
         }
         Update: {
@@ -631,6 +633,7 @@ export type Database = {
           status?: string
           title?: string
           url?: string
+          zyte_recheck_at?: string | null
           zyte_started_at?: string | null
         }
         Relationships: [
@@ -769,6 +772,9 @@ export type Database = {
       replace_campaigns: { Args: { _campaigns: Json }; Returns: number }
       rescan_link: { Args: { _link_id: string }; Returns: number }
       zyte_day_start: { Args: never; Returns: string }
+      zyte_recheck_archive: { Args: { _link_id: string }; Returns: undefined }
+      zyte_recheck_requeue: { Args: { _ids: string[] }; Returns: number }
+      zyte_recheck_unarchive: { Args: { _link_id: string }; Returns: undefined }
       zyte_today: { Args: never; Returns: number }
     }
     Enums: {
