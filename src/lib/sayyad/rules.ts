@@ -108,6 +108,8 @@ export const platformList=['linktree','wix','google_sites','pages_dev','netlify'
 /** Display name for a stored platform key; 'other' means the site has its own domain. */
 export const platformLabel=(p:string)=>p==='other'?'نطاق خاص':p;
 export const freePlatform = (platform: string)=>['linktree','wix','google_sites','pages_dev','netlify','vercel'].includes(platform);
+/** Shared social hosts: the login wall and the post path belong to the platform, not to the page owner. */
+export const socialPlatform = (platform: string)=>['facebook','instagram','x','tiktok','snapchat'].includes(platform);
 export const registrationDomain = (domain: string)=>getDomain(domain,{allowPrivateDomains:false}) ?? domain;
 export function normalizePhone(p: string) {
   const digits=p.replace(/[٠-٩]/g,c=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(c))).replace(/\D/g,'');
@@ -157,18 +159,24 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
   const embedded=lexical.find(l=>l.key==='similarity'&&l.embedded);
   if(similar) add('similarity',30,embedded?`${embedded.reason}: ${domain}`:`يحمل اسم ${similar.name_ar} على نطاق غير رسمي: ${domain}`);
   // URL-only signals never double count a key already scored above.
+  // On social hosts, a brand+bait mention in the post path counts only when the AI confirms the same entity (official accounts post about fines too).
+  const social=socialPlatform(input.platform);
+  const aiConfirms=(e:Entity|null)=>!!e&&named?.id===e.id&&input.ai.impersonation_confidence>=0.6;
   let lexPoints=0;
-  for(const l of lexical)if(signals[l.key]===undefined){add(l.key,l.points,l.reason);lexPoints+=l.points;}
+  for(const l of lexical)if(signals[l.key]===undefined){if(social&&l.key==='similarity'&&!l.embedded&&!aiConfirms(l.entity))continue;add(l.key,l.points,l.reason);lexPoints+=l.points;}
   if(parent) add('inherited_suspicion',30,`مرتبط بصفحة تنتحل ${parent.entity.name_ar}: ${parent.domain}`);
-  if(asksPayment || input.ai.asks_sensitive_data) add('sensitive_request',20,input.ai.asks_sensitive_data?'يطلب بيانات حساسة مثل كلمة المرور أو رمز التحقق أو الهوية أو الحساب البنكي':'يطلب الدفع أو بيانات البطاقة المصرفية');
+  const scam=input.ai.scam_type ?? 'none',scamConf=input.ai.scam_confidence ?? 0;
+  const scamHit=scam!=='none'&&scamConf>=scamThreshold;
+  // A social login wall or a post about paying fines is not the page asking for data: needs confirmed impersonation or a scam pattern there.
+  const socialUnconfirmed=social&&signals['impersonation']===undefined&&!parent&&!scamHit;
+  if((asksPayment || input.ai.asks_sensitive_data)&&!socialUnconfirmed) add('sensitive_request',20,input.ai.asks_sensitive_data?'يطلب بيانات حساسة مثل كلمة المرور أو رمز التحقق أو الهوية أو الحساب البنكي':'يطلب الدفع أو بيانات البطاقة المصرفية');
   if(input.age!==null && input.age<90) add('new_domain',15,`النطاق عمره ${input.age} يوم فقط`);
   // A certificate first seen in CT logs counts as the same new-domain signal, only when the age is unknown (never double counted).
   if(input.ctFirstSeen&&input.age===null&&signals['new_domain']===undefined){const t=Date.parse(input.ctFirstSeen);if(Number.isFinite(t)){const days=Math.max(0,Math.floor(((input.now ?? Date.now())-t)/86400000));if(days<90)add('new_domain',15,`نطاق جديد ظهر في سجلات الشهادات قبل ${days} يوم`);}}
   const phones=[...new Set([...input.ai.phones_found,...(input.mapsPhone?[input.mapsPhone]:[])].map(normalizePhone))];
   const mismatch=entity ? phones.find(p=>uaePhone(p) && !entity.official_phones.some(o=>canonicalPhone(o)===canonicalPhone(p))) : null;
   if(mismatch && entity) add('phone_mismatch',10,`رقم الهاتف ${mismatch} لا يطابق الأرقام الرسمية لـ${entity.name_ar}: ${entity.official_phones.join('، ') || 'لا توجد أرقام مسجلة'}`);
-  const scam=input.ai.scam_type ?? 'none',scamConf=input.ai.scam_confidence ?? 0;
-  if(scam!=='none'&&scamConf>=scamThreshold) add('scam_pattern',30,scamReasons[scam] ?? 'نمط احتيال معروف');
+  if(scamHit) add('scam_pattern',30,scamReasons[scam] ?? 'نمط احتيال معروف');
   const suffix=getPublicSuffix(domain,{allowPrivateDomains:false}) ?? '';
   if(!freePlatform(input.platform)&&riskyTlds.includes(suffix)) add('risky_tld',10,`امتداد نطاق شائع في الاحتيال (.${suffix})`);
   if(freePlatform(input.platform)) add('free_platform',10,`الموقع مستضاف على منصة مجانية: ${input.platform}`);
@@ -180,7 +188,7 @@ export function scoreFinding(input:{url:string;entities:Entity[];ai:AiFinding;ag
     signals['brand_only_cap']=true;
   }
   // Floor: credential/payment requests on an unofficial, unknown domain always need review.
-  if((input.ai.asks_sensitive_data||input.ai.asks_payment_or_card)&&!officialDestination(domain,input.entities)&&score<30){score=30;reasons.push('يطلب بيانات دخول أو دفع على نطاق غير رسمي — يحتاج مراجعة');signals['sensitive_floor']=true;}
+  if((input.ai.asks_sensitive_data||input.ai.asks_payment_or_card)&&!socialUnconfirmed&&!officialDestination(domain,input.entities)&&score<30){score=30;reasons.push('يطلب بيانات دخول أو دفع على نطاق غير رسمي — يحتاج مراجعة');signals['sensitive_floor']=true;}
   score=Math.min(100,score);signals['confidence']=input.ai.impersonation_confidence;signals['scam_type']=scam;signals['scam_confidence']=scamConf;signals['lexical']=lexPoints;if(input.ai.visual_brand_match!==undefined){signals['visual_brand_match']=input.ai.visual_brand_match;signals['visual_brand_entity']=input.ai.visual_brand_entity ?? null;}
   return {score,level:riskLevel(score),reasons_ar:reasons.length?reasons:['لا توجد علامات انتحال في الأدلة المتاحة'],signals,entity,phones};
 }

@@ -1,0 +1,13 @@
+import {describe,it,expect} from 'vitest';
+import {scoreFinding,socialPlatform,type AiFinding,type Entity} from '@/lib/sayyad/rules';
+const tamm:Entity={id:'00000000-0000-4000-8000-000000000011',name_ar:'تم',name_en:'TAMM',category:'government',official_domains:['tamm.abudhabi'],official_phones:['800555'],brand_keywords:['تم','tamm'],created_at:'2026-11-24T00:00:00Z'};
+const ai:AiFinding={impersonated_entity:null,impersonation_confidence:0,asks_payment_or_card:false,asks_sensitive_data:false,phones_found:[],summary_ar:''};
+const run=(url:string,platform:string,a:Partial<AiFinding>={},evidenceText:string[]=[])=>scoreFinding({url,entities:[tamm],ai:{...ai,...a},age:10835,mapsPhone:null,platform,evidenceText});
+describe('Social login wall and post paths',()=>{
+  it('lists only shared social hosts',()=>{for(const p of ['facebook','instagram','x','tiktok','snapchat'])expect(socialPlatform(p)).toBe(true);for(const p of ['other','linktree','telegram','whatsapp'])expect(socialPlatform(p)).toBe(false);});
+  it('a login wall on a social post is not floored to yellow',()=>{const r=run('https://www.facebook.com/somepage/posts/123','facebook',{asks_sensitive_data:true});expect(r.level).toBe('green');expect(r.signals['sensitive_floor']).toBeUndefined();expect(r.signals['sensitive_request']).toBeUndefined();});
+  it('an official-looking post path about paying fines is not similarity without AI confirmation',()=>{const r=run('https://www.facebook.com/TAMMAbuDhabi/videos/pay-fines-discount/1','facebook',{asks_payment_or_card:true},['ادفع مخالفاتك']);expect(r.signals['similarity']).toBeUndefined();expect(r.level).toBe('green');});
+  it('a confirmed fake social page still scores red',()=>{const r=run('https://www.facebook.com/tamm.pay.fines/posts/1','facebook',{impersonated_entity:'TAMM',impersonation_confidence:.8,asks_payment_or_card:true});expect(r.signals['impersonation']).toBe(35);expect(r.signals['similarity']).toBe(30);expect(r.signals['sensitive_request']).toBe(20);expect(r.level).toBe('red');});
+  it('a scam pattern on social keeps the sensitive request',()=>{const r=run('https://www.instagram.com/maids.cheap/','instagram',{asks_payment_or_card:true,scam_type:'unlicensed_domestic_workers',scam_confidence:.9});expect(r.signals['scam_pattern']).toBe(30);expect(r.signals['sensitive_request']).toBe(20);expect(r.level).toBe('yellow');});
+  it('own domains keep the floor and the path rule unchanged',()=>{const r=run('https://merchant.example/checkout','other',{asks_payment_or_card:true});expect(r.score).toBe(30);expect(r.signals['sensitive_floor']).toBe(true);const p=run('https://merchant.example/tamm/pay-fines','other');expect(p.signals['similarity']).toBe(30);});
+});
